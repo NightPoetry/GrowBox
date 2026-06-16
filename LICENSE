@@ -1,0 +1,48 @@
+MIT License (with mandatory attribution)
+
+Copyright (c) 2026 GrowBox Dev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the
+ADDITIONAL TERM below) shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+ADDITIONAL TERM: MANDATORY ATTRIBUTION
+
+In addition to the conditions of the MIT License above, any distribution,
+derivative work, or product that uses this Software, in whole or in part, MUST
+provide clear and visible attribution to the original project "GrowBox" and a
+link to its original source repository. The attribution MUST appear in at
+least one user-facing location, such as:
+
+  - the product's documentation or README;
+  - an "About", "Credits", or "Acknowledgements" screen or section; or
+  - the notices that accompany a source or binary distribution.
+
+The attribution must, at minimum, state "Based on GrowBox (<ORIGINAL_REPO_URL>)"
+and retain the copyright notice above. Removing, hiding, or obscuring this
+attribution is not permitted.
+
+-------------------------------------------------------------------------------
+附加条款:强制署名(中文,与上文等效)
+
+除上述 MIT 许可条款外,任何对本软件(整体或部分)的分发、衍生作品,或使用本软件
+的产品,都必须对原始项目 "GrowBox" 作出清晰、可见的署名,并附上其原始源码仓库链接。
+署名至少须出现在以下任一用户可见之处:产品文档 / README、"关于 / 鸣谢 / 致谢"
+界面或章节、或源码 / 二进制分发随附的声明文件中。署名须至少写明
+"Based on GrowBox (<原始仓库链接>)" 并保留上述版权声明。不得移除、隐藏或淡化该署名。
