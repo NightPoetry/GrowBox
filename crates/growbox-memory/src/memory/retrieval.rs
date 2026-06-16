@@ -12,7 +12,8 @@ impl Memory {
             .timeline
             .metas()
             .iter()
-            .filter(|m| !m.has_embedding || m.embedding_version != ver)
+            // 待破碎的大节点先别嵌(等破成块再嵌块);已破的父节点不嵌(它已退出索引)。
+            .filter(|m| (!m.has_embedding || m.embedding_version != ver) && !m.needs_chunk && !m.chunked)
             .map(|m| m.id.clone())
             .collect();
         if todo.is_empty() {
@@ -36,7 +37,8 @@ impl Memory {
             .timeline
             .metas()
             .iter()
-            .filter(|m| !m.has_embedding || m.embedding_version != ver)
+            // 待破碎的大节点先别嵌(等破成块再嵌块);已破的父节点不嵌(它已退出索引)。
+            .filter(|m| (!m.has_embedding || m.embedding_version != ver) && !m.needs_chunk && !m.chunked)
             .map(|m| m.id.clone())
             .collect();
         if limit > 0 && todo.len() > limit {
@@ -54,6 +56,95 @@ impl Memory {
         }
         self.rebuild_index();
         done
+    }
+
+    // --- 文档破碎化(idle，排在补嵌之前) ---
+
+    /// 分批破碎待破文档(idle 飞轮调,**排在补嵌之前**——好让生成的小块紧接着被嵌入):
+    /// 每次最多破 `limit` 个待破节点,把每个按句破成小块(LLM 判破点 + 尺寸兜底)→ 各块独立成节点、
+    /// 父节点标 `chunked` 退出索引,返回本批实破条数。返回 0 = 没有待破(可停)。
+    /// 与 `ensure_embeddings_batch` 同构:有界 + 可在批间让位前台/取消。`limit==0` = 无界(破完所有待破)。
+    pub async fn chunk_pending_batch(&mut self, sub: &dyn Subconscious, limit: usize) -> usize {
+        // 待破 = meta.needs_chunk(只读元信息、不触盘)。
+        let mut todo: Vec<String> = self
+            .timeline
+            .metas()
+            .iter()
+            .filter(|m| m.needs_chunk)
+            .map(|m| m.id.clone())
+            .collect();
+        if limit > 0 && todo.len() > limit {
+            todo.truncate(limit);
+        }
+        if todo.is_empty() {
+            return 0;
+        }
+        let target = self.retrieval_cfg.chunk_min_chars; // 块目标尺寸 ≈ 破碎阈(块尽量大但不超嵌入窗)
+        let mut done = 0usize;
+        let mut any_chunked = false;
+        for id in todo {
+            let Some(content) = self.timeline.content(&id) else {
+                self.timeline.clear_needs_chunk(&id); // 内容已不在(理论不会)→ 清标志免反复重试
+                self.persist_node(&id);
+                continue;
+            };
+            let role = self.timeline.meta(&id).map(|m| m.role.clone()).unwrap_or_else(|| "user".into());
+            let project = self.timeline.meta(&id).and_then(|m| m.project_id.clone());
+            let sentences = crate::memory::split_sentences(&content);
+            let chunks = self.assemble_chunks(&sentences, sub, target).await;
+            done += 1;
+            if chunks.len() <= 1 {
+                // 破不出第二块(单句超长 / 文档本就短小)→ 不产生重复子节点,仅清标志,父节点照常留用。
+                self.timeline.clear_needs_chunk(&id);
+                self.persist_node(&id);
+                continue;
+            }
+            for c in chunks {
+                self.ingest_chunk(c, role.clone(), project.clone());
+            }
+            self.timeline.mark_chunked(&id); // 父退出索引/补嵌/线性扫(内容已由块表示)
+            self.persist_node(&id);
+            any_chunked = true;
+        }
+        if any_chunked {
+            self.rebuild_index(); // 已破父节点退出索引(块的向量由随后的补嵌 pass 再进)
+        }
+        done
+    }
+
+    /// 句序列 → 破点 → 各块原文(精确拼接,零丢字零改写)。破点 = LLM 判的语义"另起一块"句下标
+    /// **并上**尺寸上限(任何块不超过 `target`,超了也断)——故 LLM 不给破点时退化成纯尺寸贪心,
+    /// 绝不会又拼回一个大节点。返回各块原文(纯空白块丢弃)。
+    /// `&mut self`(虽不改状态):使跨 `chunk_doc().await` 持有 `&mut Memory`(Send)而非 `&Memory`
+    /// (因 RefCell !Sync 故 !Send),与其它 await 方法一致,可在 spawn 的 idle 循环里用。
+    async fn assemble_chunks(&mut self, sentences: &[String], sub: &dyn Subconscious, target: usize) -> Vec<String> {
+        if sentences.is_empty() {
+            return Vec::new();
+        }
+        let llm_breaks: HashSet<usize> = sub
+            .chunk_doc(sentences, target)
+            .await
+            .into_iter()
+            .filter(|&i| i > 0 && i < sentences.len()) // 0 无意义(块本就从此起);越界丢弃
+            .collect();
+        let mut chunks = Vec::new();
+        let mut cur = String::new();
+        let mut cur_len = 0usize;
+        for (i, s) in sentences.iter().enumerate() {
+            let len = s.chars().count();
+            let llm_break = llm_breaks.contains(&i);
+            let size_break = target > 0 && cur_len + len > target;
+            if (llm_break || size_break) && !cur.trim().is_empty() {
+                chunks.push(std::mem::take(&mut cur));
+                cur_len = 0;
+            }
+            cur.push_str(s);
+            cur_len += len;
+        }
+        if !cur.trim().is_empty() {
+            chunks.push(cur);
+        }
+        chunks
     }
 
     // --- 检索:分层下沉 ---
@@ -547,7 +638,7 @@ impl Memory {
             .metas()
             .iter()
             .rev()
-            .filter(|m| m.stain != Stain::Deep)
+            .filter(|m| m.stain != Stain::Deep && !m.chunked) // 已破父节点跳过(内容已由各块表示)
             .map(|m| m.id.clone())
             .collect();
         // 建边的源:最相关的入口;无入口(RAG 全空)则用当前位置(最近节点)。

@@ -1286,3 +1286,104 @@ async fn stress_repeated_retrieval_dye_accelerates_embedded() {
 fn ring_default_is_64k() {
     assert_eq!(crate::DEFAULT_RING_CHARS, 64_000, "ring 默认应为 64K");
 }
+
+// ============================================================================
+// 文档破碎化(2026-06-17,修 dream-board 投喂文档检索盲区)
+// 验证:大文档入场标待破 / idle 破成小块 / 父节点退出索引 / 破碎后窄问由 RAG 第一层命中(稀释解除)/
+//       结构化 kind 豁免破碎。
+// ============================================================================
+
+/// 词袋嵌入 mock:向量 = 各词在文本里出现次数(over 固定小词表)。
+/// 用途:整篇文档含**所有**词 → 向量被稀释,窄问余弦低于命中阈(复现病根);
+/// 单块只含一个词 → 向量聚焦,窄问余弦=1 命中(证明破碎治本)。judge_relevant 按子串(精确层兜底)。
+struct BagEmbed {
+    judge_calls: Arc<AtomicUsize>,
+}
+const BAG_VOCAB: &[&str] = &["idea-card", "db-accent", "better-sqlite3", "express"];
+#[async_trait]
+impl Subconscious for BagEmbed {
+    async fn embed(&self, text: &str) -> Vec<f32> {
+        let lower = text.to_lowercase();
+        BAG_VOCAB.iter().map(|t| lower.matches(t).count() as f32).collect()
+    }
+    async fn judge_relevant(&self, query: &str, candidates: &[String]) -> Vec<usize> {
+        self.judge_calls.fetch_add(1, Ordering::SeqCst);
+        candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.contains(query))
+            .map(|(i, _)| i)
+            .collect()
+    }
+    // chunk_doc 用默认实现(按 target 贪心),无需 LLM。
+}
+
+/// ★dream-board 回归★:整篇技术栈文档破碎前窄问被稀释,破碎后由 RAG 第一层直接命中对应块。
+#[tokio::test]
+async fn chunking_fixes_rag_dilution_for_fed_document() {
+    let sub = BagEmbed { judge_calls: Arc::new(AtomicUsize::new(0)) };
+    let mut m = Memory::new();
+    // 设小破碎阈,让这篇短"文档"也触发破碎(真机默认 1500;块目标≈阈,按行破)。
+    m.set_retrieval_config(RetrievalConfig { chunk_min_chars: 30, ..RetrievalConfig::default() });
+    let doc = "想法卡片的 class 统一叫 idea-card。\n主题色 token 叫 db-accent。\n\
+               数据库用 better-sqlite3 存数据。\n服务端用 express 框架。";
+    let parent = m.ingest_with_role(doc, "user");
+    assert!(m.timeline().meta(&parent).unwrap().needs_chunk, "大文档入场即标待破");
+
+    // 破碎前:待破节点不嵌(等破成块)→ 索引空 → 窄问只能下沉精确层(整篇当一个节点,RAG 无从聚焦)。
+    m.ensure_embeddings(&sub).await;
+    let (_pre, pre_layer) = m.retrieve("idea-card", &sub).await;
+    assert_eq!(pre_layer, Layer::Exact, "破碎前窄问无法走 RAG(大节点未嵌/稀释),只能下沉");
+
+    // 破碎:1 篇文档 → 多块,父节点标 chunked。
+    let n = m.chunk_pending_batch(&sub, 0).await;
+    assert_eq!(n, 1, "破了 1 篇文档");
+    assert!(m.timeline().meta(&parent).unwrap().chunked, "父节点已标 chunked");
+    assert!(!m.timeline().meta(&parent).unwrap().needs_chunk);
+    assert!(m.timeline().len() >= 5, "父 + 至少 4 块(实际 {})", m.timeline().len());
+
+    // 嵌入各块(父被跳过),建索引。
+    m.ensure_embeddings(&sub).await;
+
+    // 破碎后:窄问"idea-card"由 RAG 第一层直接命中含 .idea-card 的那块(稀释解除)。
+    let (hits, layer) = m.retrieve("idea-card", &sub).await;
+    assert_eq!(layer, Layer::Rag, "破碎后窄问由 RAG 第一层命中(不再被稀释逼下沉)");
+    assert!(
+        hits.iter().any(|h| h.content.contains("idea-card") && h.content.contains("class")),
+        "命中含 .idea-card class 的那块"
+    );
+    // 已破父节点退出索引 → 绝不作为命中返回(只让小块上场)。
+    assert!(!hits.iter().any(|h| h.source == parent), "已破父节点不再被检索命中");
+    // 另一窄问:数据库 → better-sqlite3 那块(对照旧版凭空答 sql.js)。
+    let (hits2, _) = m.retrieve("better-sqlite3", &sub).await;
+    assert!(
+        hits2.iter().any(|h| h.content.contains("better-sqlite3")),
+        "命中 better-sqlite3 那块(治好旧版幻觉)"
+    );
+}
+
+/// split_sentences:拼接精确还原原文(零丢字),在句末符/换行处断开。
+#[test]
+fn split_sentences_preserves_content_and_breaks_on_enders() {
+    let doc = "第一句。第二句！第三句?\n第四行没句号";
+    let s = split_sentences(doc);
+    assert_eq!(s.concat(), doc, "拼接还原原文,零丢字零改写");
+    assert!(s.len() >= 4, "句末符(。!?)与换行处断开(实际 {} 段)", s.len());
+    assert!(s[0].ends_with('。'));
+}
+
+/// 结构化 kind(流程/技能/工具记忆)豁免破碎——它们靠整节点解析,破开会毁掉对应系统。
+#[tokio::test]
+async fn structured_kinds_are_exempt_from_chunking() {
+    let sub = BagEmbed { judge_calls: Arc::new(AtomicUsize::new(0)) };
+    let mut m = Memory::new();
+    m.set_retrieval_config(RetrievalConfig { chunk_min_chars: 10, ..RetrievalConfig::default() });
+    let long = "很长很长的配方正文需要整块解析".repeat(3); // 远超 10 字符阈
+    let pid = m.ingest_process(long.clone());
+    assert!(!m.timeline().meta(&pid).unwrap().needs_chunk, "流程节点豁免:不标待破");
+    // 同样长度的普通 user 内容则标待破(对照,证明阈值确实触发)。
+    let uid = m.ingest_with_role(long, "user");
+    assert!(m.timeline().meta(&uid).unwrap().needs_chunk, "普通大节点标待破");
+    let _ = m.chunk_pending_batch(&sub, 0).await;
+    assert!(!m.timeline().meta(&pid).unwrap().chunked, "流程节点始终不被破碎");
+}

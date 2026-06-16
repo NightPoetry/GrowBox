@@ -52,6 +52,11 @@ const SCAN_BATCH: usize = 8;
 /// 在 idle 补嵌前被埋(置换率恒0/上下文割裂)。现在 L2 渐进扫从最新往回多批推进,直到攒够命中/扫满此预算/
 /// 连续空批/扫到最早。数值全可设(推论9)。
 const SCAN_MAX: usize = 256;
+/// ★文档破碎阈(2026-06-17,修 dream-board 投喂文档检索盲区)★:入场 content 字符数 > 此值的节点
+/// (典型 = 用户粘贴的整篇技术栈/约定文档)标 `needs_chunk`,idle 按句破成小块。1500:正常对话/回复
+/// 几十~几百字远低于(不破),粘贴文档常 1000+ 字高于(破)。e5 嵌入窗约 512 token,超此长度单条向量
+/// 必然稀释/截断 → RAG 对其窄问必漏,故破成小块各自成向量。数值全可设(推论9);0 = 关闭破碎。
+const CHUNK_MIN_CHARS: usize = 1500;
 /// 项目软偏好:检索命中若属当前项目,相似度乘 (1 + 此值) 再排序(软偏好,非硬过滤)。
 /// 0 = 不偏好(纯按相似度);默认 0.5 = 本项目命中相似度 +50%。跨项目高相关仍可压过本项目低相关被召回。
 const PROJECT_BOOST: f32 = 0.5;
@@ -89,6 +94,38 @@ pub(crate) const PROCESS_RECALL_SOURCE: &str = "__process_recall__";
 /// 正 K = 该 skill 服务过的 query 族(语义召回即用)、反 K = 这族 query 用它判错/被更正版取代(召回时否决)。
 /// 复用同一持久化 mesh 边机制,零新存储。技能与流程同族两 kind,各用一个哨兵源,互不干扰。
 pub(crate) const SKILL_RECALL_SOURCE: &str = "__skill_recall__";
+
+/// 该角色的大节点是否该被破碎化。结构化 kind(流程/技能/工具记忆)**豁免**——它们靠整节点解析
+/// (`retrieve_processes`/`retrieve_skills`/`consult_tool_memory` 解析节点头),破开会毁掉这些系统。
+/// 普通内容(user/assistant/tool/internal/system)粘进整篇文档才需要破碎。
+fn is_chunkable_role(role: &str) -> bool {
+    !matches!(
+        role,
+        crate::node_kind::PROCESS | crate::node_kind::SKILL | crate::node_kind::TOOL_MEMORY
+    )
+}
+
+/// 把一篇文档切成**原子句序列**,保证 `chunks.concat() == 原文`(零丢字、零改写——破点只在句末)。
+/// 句末符:。!?！?；;\n(含 markdown 标题前的换行天然成界)。分隔符归到**前一句**末尾。
+/// 末尾残段(无句末符结尾)也作一句。供 idle 破碎 pass:先切原子句,再交 LLM 判哪些另起一块。
+pub(crate) fn split_sentences(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for ch in text.chars() {
+        cur.push(ch);
+        if matches!(ch, '。' | '!' | '?' | '！' | '？' | '；' | ';' | '\n') {
+            // 已积累非纯空白才成句(连续换行不产生空句,纯空白仍留在 cur 里继续累积、并入下一句)。
+            if !cur.trim().is_empty() {
+                out.push(std::mem::take(&mut cur));
+            }
+        }
+    }
+    // 末尾残段:非空即收(含纯空白尾,保 concat==原文;空 cur 不收)。
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
 
 /// 项目软隔离可见性:某节点(其 project_id)在当前项目 `cur` 下是否可见。
 /// 同项目可见;全局(None tag)任何项目可见;有 tag 但当前无项目 → 不可见。工具记忆会诊/计数共用。
@@ -298,6 +335,12 @@ impl Memory {
             Some(s) => s.load_node_vectors(),
             None => self.timeline.cached_vectors(),
         };
+        // 已破碎的父节点剔出索引:其内容已由各小块表示,父向量稀释,留着会与块重复/稀释命中
+        //(dream-board 投喂文档盲区的另一半——父节点必须从 RAG 退场,只让小块上场)。
+        let items: Vec<_> = items
+            .into_iter()
+            .filter(|(id, _)| self.timeline.meta(id).map(|m| !m.chunked).unwrap_or(true))
+            .collect();
         self.index.rebuild(items);
     }
 
@@ -680,9 +723,30 @@ impl Memory {
 
     /// 摄入一条带角色的对话消息(role = "user"|"assistant"|"tool")。
     /// 供 agent_loop 和 chat history 公用,timeline 是唯一数据源。
+    ///
+    /// ★文档破碎化入场闸(2026-06-17)★:content 字符数超过破碎阈、且角色**非结构化 kind**
+    /// (流程/技能/工具记忆靠整节点解析,豁免)→ 标 `needs_chunk`,留给 idle `chunk_pending_batch`
+    /// 按句破成小块。同步只打标志(廉价、不卡回合);真正破碎(要 LLM 判破点)走 idle。
     pub fn ingest_with_role(&mut self, content: impl Into<String>, role: impl Into<String>) -> String {
+        let content = content.into();
+        let role = role.into();
         let mut node = Node::with_role(content, role);
         node.project_id = self.current_project.clone(); // 软隔离 tag:盖当前项目
+        let gate = self.retrieval_cfg.chunk_min_chars;
+        if gate > 0 && is_chunkable_role(&node.role) && node.content.chars().count() > gate {
+            node.needs_chunk = true;
+        }
+        let id = self.timeline.push(node);
+        self.persist_node(&id);
+        id
+    }
+
+    /// 摄入一个**文档碎块**(idle 破碎 pass 产出):继承父节点 role + 项目 tag,**强制不再破碎**
+    /// (块按构造已低于阈;即便是病态的"单个超长句"也接受为一块,绝不再标 `needs_chunk` 致死循环)。
+    fn ingest_chunk(&mut self, content: impl Into<String>, role: impl Into<String>, project: Option<String>) -> String {
+        let mut node = Node::with_role(content, role);
+        node.project_id = project;
+        node.needs_chunk = false;
         let id = self.timeline.push(node);
         self.persist_node(&id);
         id

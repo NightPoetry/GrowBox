@@ -114,6 +114,12 @@ const PROPOSE_SKILL_EN: &str = "You are an experience crystallizer. Below is a c
             too specific (one-off) / noise / already common sense -> do not propose. \
             If proposing, output JSON: {\"name\":\"kebab-case short name\",\"trigger\":\"one sentence: when to use it\",\"body\":\"playbook body (markdown, judgment-laden steps, concise, pointing at concrete actions)\"}. \
             If not worth crystallizing, output {\"none\":true}. Output JSON only.";
+const CHUNK_DOC_ZH: &str = "你是文档破碎器。下面是一篇长文档**按句切好的编号原子句**(从0起)。\
+            把它切成若干**语义连贯的块**:同一主题/同一条目的相邻句归一块,主题切换处另起一块。\
+            只输出每个**新块的起始句编号**的 JSON 数组(升序,例如 [0,3,7];0 可省)。不要解释、不要改写任何句子。";
+const CHUNK_DOC_EN: &str = "You are a document splitter. Below are the **numbered atomic sentences** (0-based) of a long document, already split by sentence. \
+            Group them into **semantically coherent chunks**: adjacent sentences on the same topic/entry go together, start a new chunk where the topic switches. \
+            Output only a JSON array of the **starting sentence index of each new chunk** (ascending, e.g. [0,3,7]; 0 may be omitted). Do not explain, do not rewrite any sentence.";
 
 // --- 脊柱脚手架区头(render.rs);静态说明块,数据在其后追加。zh 与硬编码逐字一致。---
 const RENDER_WORKING_ZH: &str =
@@ -169,6 +175,7 @@ pub const CATALOG: &[PromptEntry] = &[
     PromptEntry { key: "subconscious.judge_edge", role: PromptRole::Subconscious, zh: JUDGE_EDGE_ZH, en: JUDGE_EDGE_EN },
     PromptEntry { key: "subconscious.distill", role: PromptRole::Subconscious, zh: DISTILL_ZH, en: DISTILL_EN },
     PromptEntry { key: "subconscious.propose_skill", role: PromptRole::Subconscious, zh: PROPOSE_SKILL_ZH, en: PROPOSE_SKILL_EN },
+    PromptEntry { key: "subconscious.chunk_doc", role: PromptRole::Subconscious, zh: CHUNK_DOC_ZH, en: CHUNK_DOC_EN },
     PromptEntry { key: "render.working_header", role: PromptRole::Main, zh: RENDER_WORKING_ZH, en: RENDER_WORKING_EN },
     PromptEntry { key: "render.recent_header", role: PromptRole::Main, zh: RENDER_RECENT_ZH, en: RENDER_RECENT_EN },
     PromptEntry { key: "render.recipes_header", role: PromptRole::Main, zh: RENDER_RECIPES_ZH, en: RENDER_RECIPES_EN },

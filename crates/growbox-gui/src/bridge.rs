@@ -213,6 +213,30 @@ impl Subconscious for LlmBridge {
             .and_then(|v| v.get("jump").and_then(|x| x.as_bool()))
             .unwrap_or(false)
     }
+
+    /// ★文档破碎化(让 LLM 判破点)★:把编号原子句喂给 LLM,要它回"每个新块起始句下标"的 JSON 数组。
+    /// 解析失败 / 调不通 → 回退按 `target_chars` 贪心(`greedy_chunk_bounds`)——保证仍能破开,不至于又退回大节点。
+    async fn chunk_doc(&self, sentences: &[String], target_chars: usize) -> Vec<usize> {
+        if sentences.len() <= 1 {
+            return growbox_memory::greedy_chunk_bounds(sentences, target_chars);
+        }
+        let mut user = String::from("编号原子句:\n");
+        for (i, s) in sentences.iter().enumerate() {
+            user.push_str(&format!("{i}. {}\n", s.replace('\n', " ")));
+        }
+        let sys = crate::transpile::catalog("subconscious.chunk_doc", &self.prompt_lang);
+        let Ok(out) = complete(self.driver.as_ref(), self.request(&sys, user), self.silence_secs).await else {
+            return growbox_memory::greedy_chunk_bounds(sentences, target_chars); // 调不通 → 贪心兜底
+        };
+        let parsed = extract_json(&out)
+            .and_then(|j| serde_json::from_str::<Vec<usize>>(j).ok())
+            .map(|v| v.into_iter().filter(|&i| i < sentences.len()).collect::<Vec<_>>());
+        match parsed {
+            // LLM 给了有效内部破点(去 0 后仍非空)→ 用它;否则贪心兜底(memory 侧还会再并尺寸上限)。
+            Some(v) if v.iter().any(|&i| i > 0) => v,
+            _ => growbox_memory::greedy_chunk_bounds(sentences, target_chars),
+        }
+    }
 }
 
 #[async_trait]
@@ -323,6 +347,24 @@ mod tests {
             60,
         );
         assert!(!no.judge_edge("q", &[], &[], "目标内容").await, "jump:false → 不跳");
+    }
+
+    #[tokio::test]
+    async fn chunk_doc_parses_break_indices() {
+        // LLM 给出每个新块的起始句下标 JSON 数组 → 原样采用(过滤越界后)。
+        let driver = Arc::new(ScriptDriver { content: "破点是 [0, 2]".into() });
+        let bridge = LlmBridge::new(driver, "m", 1024, Arc::new(growbox_llm::LexicalEmbedder), 60);
+        let s: Vec<String> = ["a", "b", "c", "d"].iter().map(|x| x.to_string()).collect();
+        assert_eq!(bridge.chunk_doc(&s, 1000).await, vec![0, 2]);
+    }
+
+    #[tokio::test]
+    async fn chunk_doc_falls_back_to_greedy_on_garbage() {
+        // LLM 没给有效破点 → 回退按 target 贪心(target 0 = 一句一块),保证仍能破开。
+        let driver = Arc::new(ScriptDriver { content: "我不确定怎么切".into() });
+        let bridge = LlmBridge::new(driver, "m", 1024, Arc::new(growbox_llm::LexicalEmbedder), 60);
+        let s: Vec<String> = ["aaa", "bbb", "ccc"].iter().map(|x| x.to_string()).collect();
+        assert_eq!(bridge.chunk_doc(&s, 0).await, vec![0, 1, 2], "无效输出回退贪心");
     }
 
     #[tokio::test]

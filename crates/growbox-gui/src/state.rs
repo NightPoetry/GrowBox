@@ -391,6 +391,7 @@ impl AppState {
             scan_batch: self.settings.retrieval_scan_batch as usize,
             scan_max: self.settings.retrieval_scan_max as usize,
             project_boost: self.settings.retrieval_project_boost,
+            chunk_min_chars: self.settings.retrieval_chunk_min_chars as usize,
         });
         // 疲劳公式权重旋钮随用户设置(推论9 数值全可设)。
         self.memory.set_fatigue_config(growbox_memory::FatigueConfig {

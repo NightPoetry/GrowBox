@@ -31,5 +31,5 @@ pub use memory::{
 pub use pointer::{Pointer, PointerNet};
 pub use secondary::{Anchor, SecondaryIndex};
 pub use store::Store;
-pub use subconscious::{cosine, Subconscious};
+pub use subconscious::{cosine, greedy_chunk_bounds, Subconscious};
 pub use timeline::{Node, NodeMeta, Stain, Timeline};

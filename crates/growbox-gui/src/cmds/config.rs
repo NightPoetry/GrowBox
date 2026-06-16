@@ -68,9 +68,10 @@ pub async fn set_retrieval_config(
     st.settings.retrieval_entry_min_sim = entry_min_sim;
     st.settings.retrieval_scan_batch = scan_batch;
     st.settings.retrieval_project_boost = project_boost;
-    // scan_max 不在本命令参数里(避免破坏前端既有调用),沿用持久设置(默认 256);需要时单独旋钮接线。
-    // 先取进局部(避免与下方 &mut st.memory 借用冲突)。
+    // scan_max / chunk_min_chars 不在本命令参数里(避免破坏前端既有调用),沿用持久设置(默认 256 / 1500);
+    // 需要时单独旋钮接线。先取进局部(避免与下方 &mut st.memory 借用冲突)。
     let scan_max = st.settings.retrieval_scan_max as usize;
+    let chunk_min_chars = st.settings.retrieval_chunk_min_chars as usize;
     st.memory.set_retrieval_config(growbox_memory::RetrievalConfig {
         rag_hit_threshold,
         rag_topk: rag_topk as usize,
@@ -79,6 +80,7 @@ pub async fn set_retrieval_config(
         scan_batch: scan_batch as usize,
         scan_max,
         project_boost,
+        chunk_min_chars,
     });
     st.save_settings();
     Ok(())

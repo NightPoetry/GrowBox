@@ -107,7 +107,10 @@ async fn idle_loop(
         tokio::select! {
             _ = cancel.cancelled() => break,
             _ = tokio::time::sleep(cfg.tick) => {
-                // 0. 补嵌入(让语义检索可用):只要稍空闲(≥ 一个 tick)就增量补嵌,不必等 8 分钟维护阈。
+                // 0a. 文档破碎化(排在补嵌之前,好让破出的小块紧接着被嵌):把入场标了 needs_chunk 的大文档
+                //     按句破成小块。这是「修长文检索盲区」的生产入口——大节点单条向量稀释,破成小块各自向量才命中窄问。
+                chunk_while_idle(&state, &last_activity, &arbiter, &cancel, cfg.tick).await;
+                // 0b. 补嵌入(让语义检索可用):只要稍空闲(≥ 一个 tick)就增量补嵌,不必等 8 分钟维护阈。
                 //    这是「修嵌入」的生产入口——此前 ensure_embeddings 只有测试在调,真机从不嵌入。
                 embed_while_idle(&state, &last_activity, &arbiter, &cancel, cfg.tick).await;
                 if is_idle(&last_activity, cfg.threshold) {
@@ -122,6 +125,40 @@ async fn idle_loop(
 
 /// 每批补嵌的节点数上限。有界 = 批间能让位前台/取消,避免一次嵌成百上千把一次 idle 卡死。
 const EMBED_BATCH: usize = 32;
+
+/// 每批破碎的文档数上限。破碎含 LLM 调用(判破点),故批更小;批间让位前台/取消。
+const CHUNK_BATCH: usize = 4;
+
+/// 文档破碎化(让长文检索可用):稍空闲就把入场标了 `needs_chunk` 的大文档按句破成小块,分批 +
+/// 批间让位 + 可取消。取 `Flywheel` 档(优先级低于睡眠/前台)。排在 `embed_while_idle` 之前,
+/// 好让破出的小块在同一段空闲里紧接着被嵌入、进索引。无待破 → 立即返回(零开销)。
+async fn chunk_while_idle(
+    state: &SharedState,
+    last_activity: &AtomicI64,
+    arbiter: &Arc<Arbiter>,
+    cancel: &CancellationToken,
+    min_idle: Duration,
+) {
+    if !is_idle(last_activity, min_idle) {
+        return;
+    }
+    loop {
+        if cancel.is_cancelled() || !is_idle(last_activity, min_idle) {
+            break;
+        }
+        let _gate = arbiter.acquire(Priority::Flywheel).await;
+        if cancel.is_cancelled() || !is_idle(last_activity, min_idle) {
+            break;
+        }
+        let mut st = state.lock().await;
+        let Some(bridge) = st.bridge.clone() else { break };
+        let done = st.memory.chunk_pending_batch(bridge.as_ref(), CHUNK_BATCH).await;
+        drop(st);
+        if done == 0 {
+            break; // 没有待破的了
+        }
+    }
+}
 
 /// 补嵌入(让语义检索可用):稍空闲(≥ `min_idle`)就增量补嵌待向量化节点,分批 + 批间让位 + 可取消。
 /// 取 `Flywheel` 档(优先级低于睡眠/前台)。**这是「修嵌入」的生产入口**:此前 `ensure_embeddings`

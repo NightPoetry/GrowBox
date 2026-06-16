@@ -80,6 +80,10 @@ pub struct RetrievalConfig {
     pub scan_max: usize,
     /// 项目软偏好系数:命中属当前项目 → 相似度乘 (1+此值) 再排序。0=不偏好。软偏好非硬过滤。
     pub project_boost: f32,
+    /// ★文档破碎阈★:入场 content 字符数 > 此值的节点(粘贴的整篇文档)标 `needs_chunk`,
+    /// 由 idle `chunk_pending_batch` 按句破成小块(各块独立向量,治 RAG 对长文窄问必漏的盲区)。
+    /// 结构化 kind(流程/技能/工具记忆)豁免——它们靠整节点解析。0 = 关闭破碎(所有节点照原样)。
+    pub chunk_min_chars: usize,
 }
 
 impl Default for RetrievalConfig {
@@ -92,6 +96,7 @@ impl Default for RetrievalConfig {
             scan_batch: SCAN_BATCH,
             scan_max: SCAN_MAX,
             project_boost: PROJECT_BOOST,
+            chunk_min_chars: CHUNK_MIN_CHARS,
         }
     }
 }

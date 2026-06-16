@@ -61,6 +61,16 @@ pub struct Node {
     /// 检索时对本项目命中加权(软偏好)。跨项目高相关仍自然召回。
     #[serde(default)]
     pub project_id: Option<String>,
+    /// ★文档破碎化待办标志(2026-06-17)★:content 超过破碎阈(`RetrievalConfig.chunk_min_chars`)的
+    /// 大节点(粘贴的整篇文档)入场即置 true;idle `chunk_pending_batch` 据此找到它、按句破成小块后清零。
+    /// 病根:整篇多主题长文压成**一条** e5 向量(超嵌入窗的尾部还被截断)→ RAG 对其窄问必漏、且一旦染 Deep
+    /// 精确层也埋掉(dream-board 投喂文档检索盲区)。破成小块各自成节点各自向量,才让 RAG 命中窄问、染色重新可靠。
+    #[serde(default)]
+    pub needs_chunk: bool,
+    /// 已破碎的父节点标志:内容已由各小块表示 → **从向量索引剔除**(免与块重复/稀释命中)、不再补嵌、
+    /// 精确层线性扫跳过。append-only 保留作溯源,不删。
+    #[serde(default)]
+    pub chunked: bool,
 }
 
 fn default_role() -> String { "system".into() }
@@ -83,6 +93,8 @@ impl Node {
             hits: 0,
             stain: Stain::None,
             project_id: None,
+            needs_chunk: false,
+            chunked: false,
         }
     }
 }
@@ -100,6 +112,10 @@ pub struct NodeMeta {
     pub has_embedding: bool,
     /// 所属项目 tag(软隔离;None=未分类)。常驻 meta 便于显示过滤/检索加权不触盘。
     pub project_id: Option<String>,
+    /// 待破碎标志(常驻 meta:idle 破碎 pass 不触盘即可找出待破的大节点)。
+    pub needs_chunk: bool,
+    /// 已破碎父节点标志(常驻 meta:索引重建 / 补嵌 / 精确层线性扫据此跳过)。
+    pub chunked: bool,
 }
 
 impl NodeMeta {
@@ -113,6 +129,8 @@ impl NodeMeta {
             embedding_version: n.embedding_version.clone(),
             project_id: n.project_id.clone(),
             has_embedding: !n.embedding.is_empty(),
+            needs_chunk: n.needs_chunk,
+            chunked: n.chunked,
         }
     }
 }
@@ -286,6 +304,8 @@ impl Timeline {
         node.hits = m.hits;
         node.stain = m.stain;
         node.embedding_version = m.embedding_version.clone();
+        node.needs_chunk = m.needs_chunk;
+        node.chunked = m.chunked;
         Some(node)
     }
 
@@ -332,6 +352,23 @@ impl Timeline {
     pub fn stain(&mut self, id: &str, stain: Stain) {
         if let Some(&i) = self.index.get(id) {
             self.metas[i].stain = stain;
+        }
+    }
+
+    /// 标记某节点为"已破碎父节点":清待破标志 + 置已破碎(meta 权威,`get` 叠加 → `persist_node` 落盘)。
+    /// 此后该父节点被索引重建剔除、补嵌跳过、精确层线性扫跳过;内容已由各块表示。
+    pub fn mark_chunked(&mut self, id: &str) {
+        if let Some(&i) = self.index.get(id) {
+            self.metas[i].needs_chunk = false;
+            self.metas[i].chunked = true;
+        }
+    }
+
+    /// 只清"待破碎"标志、**不**置 chunked(破碎 pass 判定破不出第二块时调:父节点仍是唯一载体,
+    /// 留在索引/可检索;只是别再反复尝试破它)。
+    pub fn clear_needs_chunk(&mut self, id: &str) {
+        if let Some(&i) = self.index.get(id) {
+            self.metas[i].needs_chunk = false;
         }
     }
 

@@ -148,6 +148,10 @@ pub struct Settings {
     /// 软偏好非硬过滤——跨项目高相关仍可被召回。数值全可设(推论9)。
     #[serde(default = "default_retrieval_project_boost")]
     pub retrieval_project_boost: f32,
+    /// 文档破碎阈:入场 content 字符数超过此值的大节点(粘贴的整篇文档)由 idle 按句破成小块,
+    /// 各块独立向量 → 治长文窄问被稀释、RAG 必漏的盲区(默认 1500;0=关闭破碎)。数值全可设(推论9)。
+    #[serde(default = "default_retrieval_chunk_min_chars")]
+    pub retrieval_chunk_min_chars: u32,
     /// Agent 截断重试上限:工具调用被截成空参时最多翻倍 token 重试几次(默认 2)。数值全可设(推论9)。
     #[serde(default = "default_agent_max_token_retries")]
     pub agent_max_token_retries: u32,
@@ -486,6 +490,9 @@ fn default_retrieval_scan_max() -> u32 {
 fn default_retrieval_project_boost() -> f32 {
     0.5
 }
+fn default_retrieval_chunk_min_chars() -> u32 {
+    1500
+}
 fn default_agent_max_token_retries() -> u32 {
     2
 }
@@ -632,6 +639,7 @@ impl Default for Settings {
             retrieval_scan_batch: default_retrieval_scan_batch(),
             retrieval_scan_max: default_retrieval_scan_max(),
             retrieval_project_boost: default_retrieval_project_boost(),
+            retrieval_chunk_min_chars: default_retrieval_chunk_min_chars(),
             agent_max_token_retries: default_agent_max_token_retries(),
             agent_token_ceil: default_agent_token_ceil(),
             agent_silence_secs: default_agent_silence_secs(),

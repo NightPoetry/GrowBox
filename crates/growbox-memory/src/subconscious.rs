@@ -44,6 +44,36 @@ pub trait Subconscious: Send + Sync {
         let _ = (positives, negatives);
         !self.judge_relevant(query, &[target.to_string()]).await.is_empty()
     }
+
+    /// ★文档破碎化(让 LLM 自己判断从哪破开)★:给一篇大文档**已按句末符切好的原子句序列**,
+    /// 判断哪些句子**另起一块**——返回这些"块首句"的下标(升序;下标 0 隐含为首块起点,可省)。
+    /// 语义连贯的相邻句应归同一块。memory 侧据此把原子句**精确拼接**成各块(零改写、零丢字),
+    /// 各块独立成节点、独立向量 → RAG 能命中文档里的窄问(如"想法卡片 class 叫什么")。
+    /// 默认实现 = 按 `target_chars` 贪心分组(无 LLM 也得合理切分;mock / LLM 降级用);
+    /// 真实现(`bridge.rs`,LLM)读语义判断破点,失败回退本贪心。
+    async fn chunk_doc(&self, sentences: &[String], target_chars: usize) -> Vec<usize> {
+        greedy_chunk_bounds(sentences, target_chars)
+    }
+}
+
+/// 按目标字符数贪心分组:从头累积句子,**加上当前句会超过 `target_chars` 就在当前句另起一块**。
+/// 返回各块首句下标(升序、含 0、严格递增)。`target_chars == 0` = 一句一块。空输入返回空。
+/// 既是 `chunk_doc` 的默认实现,也是真 LLM 实现解析失败时的回退(语义无关但保证切开,不至于又退回大节点)。
+pub fn greedy_chunk_bounds(sentences: &[String], target_chars: usize) -> Vec<usize> {
+    if sentences.is_empty() {
+        return Vec::new();
+    }
+    let mut bounds = vec![0usize];
+    let mut acc = 0usize;
+    for (i, s) in sentences.iter().enumerate() {
+        let len = s.chars().count();
+        if i > 0 && (target_chars == 0 || acc + len > target_chars) {
+            bounds.push(i);
+            acc = 0;
+        }
+        acc += len;
+    }
+    bounds
 }
 
 /// 余弦相似度(第一层 RAG 排序用)。
@@ -83,5 +113,18 @@ mod tests {
     #[test]
     fn cosine_mismatch_len_is_zero() {
         assert_eq!(cosine(&[1.0], &[1.0, 2.0]), 0.0);
+    }
+
+    #[test]
+    fn greedy_chunk_bounds_groups_by_target() {
+        let s: Vec<String> = ["aaa", "bbb", "ccc", "ddd"].iter().map(|x| x.to_string()).collect();
+        // target 6:aaa+bbb=6 不超,ccc 会超 → 块首 [0,2];块 = (aaa bbb)(ccc ddd)。
+        assert_eq!(greedy_chunk_bounds(&s, 6), vec![0, 2]);
+        // target 0:一句一块。
+        assert_eq!(greedy_chunk_bounds(&s, 0), vec![0, 1, 2, 3]);
+        // 大 target:不切,整篇一块。
+        assert_eq!(greedy_chunk_bounds(&s, 9999), vec![0]);
+        // 空输入。
+        assert!(greedy_chunk_bounds(&[], 10).is_empty());
     }
 }
