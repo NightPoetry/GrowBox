@@ -1,0 +1,15 @@
+[package]
+name = "growbox-learn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+growbox-core = { path = "../growbox-core" }
+growbox-memory = { path = "../growbox-memory" }
+serde = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

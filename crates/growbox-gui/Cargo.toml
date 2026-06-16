@@ -1,0 +1,84 @@
+[package]
+name = "growbox-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# 库(脊柱:state/registry/executors/bridge/agent,无 Tauri 依赖,可独立单测)
+# + 二进制(Tauri 薄壳)。
+[lib]
+name = "growbox_gui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "growbox"
+path = "src/main.rs"
+
+[features]
+# 默认带本地 e5 嵌入(candle),不带调试端点。正式包:`cargo tauri build`。
+# 测试包(含 :19999 调试端口 + debug_eval/e2e_report IPC + webview devtools):
+#   `cargo tauri build --features debug-endpoints`
+# 快速迭代不要 candle:`--no-default-features`(退化为词法嵌入)。
+# devtools 跟随 debug-endpoints:正式 release 包不带 Web Inspector(tauri 在 debug 构建里恒自带)。
+default = ["local-embed"]
+debug-endpoints = ["tauri/devtools"]
+# 本地嵌入:转发到 growbox-llm 的同名 feature(state::build_local_embedder 据此选 candle/词法)。
+local-embed = ["growbox-llm/local-embed"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+growbox-core = { path = "../growbox-core" }
+# default-features=false:本地嵌入由 gui 的 local-embed feature 转发控制(见 [features])。
+growbox-llm = { path = "../growbox-llm", default-features = false }
+growbox-safety = { path = "../growbox-safety" }
+growbox-memory = { path = "../growbox-memory" }
+growbox-learn = { path = "../growbox-learn" }
+
+tauri = { version = "2", features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+parking_lot = { workspace = true }
+# 跨平台家目录/个人文件夹识别(自动模式隐私网):知名成熟、纯 Rust 无原生依赖。
+dirs = "5"
+# 语言服务器自动装配(A1.5):HTTPS 下载 rust-analyzer release + gunzip,装进自有数据目录。
+reqwest = { workspace = true }
+flate2 = { workspace = true }
+# web_fetch 正文化:HTML → 可读纯文本(纯 Rust);futures 给流式按上限读响应体(StreamExt)。
+html2text = { workspace = true }
+futures = { workspace = true }
+# 提示词版本库:每版覆盖表 gzip(flate2) + base64 成可存 redb 的压缩串("历史提示词"备份/还原)。
+base64 = "0.21"
+# 历史提示词导出/导入磁盘 .zip 文件(manifest.json + overrides.json)。
+zip = "7"
+# 代码搜索(A3 code_search):ignore=ripgrep 遍历库(尊重 .gitignore + glob/type 过滤),regex=匹配。
+ignore = { workspace = true }
+regex = { workspace = true }
+# tree-sitter 第2层(D3 M4):无 LSP 语言/未装服务器项目的结构兜底(列文件大纲)。grammar 经 cc 编译 C。
+tree-sitter = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-python = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-typescript = "0.23"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio-util = { workspace = true }
+# Unix 进程组信号(shell 超时/取消杀整组,含后台 `&` 子进程)。
+libc = { workspace = true }
+# 交互式终端(人机共驾 shell):跨平台 PTY(wezterm 同源,纯 Rust + 系统 PTY,无重依赖)。
+portable-pty = "0.8"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+# test-util:虚拟时钟(start_paused),让沉默超时类回归测试瞬间完成而非真等 60s。
+tokio = { workspace = true, features = ["test-util"] }
+# 真机端到端测试(tests/live_agent.rs)用:直接构造各 crate 跑整条循环。
+growbox-llm = { path = "../growbox-llm" }
+growbox-safety = { path = "../growbox-safety" }
+growbox-memory = { path = "../growbox-memory" }
+growbox-learn = { path = "../growbox-learn" }

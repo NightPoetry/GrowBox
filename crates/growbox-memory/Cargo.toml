@@ -1,0 +1,21 @@
+[package]
+name = "growbox-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+growbox-core = { path = "../growbox-core" }
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+sha2.workspace = true
+redb.workspace = true
+instant-distance = "0.6.1"
+arroy = "0.6.4"
+heed = "0.22.1"
+rand = "0.8"
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile.workspace = true

@@ -1,0 +1,788 @@
+{
+  "_note": "提示/告知 单一事实源(设计见 设计文档/感知告知-双受众.md)。每条按 code 唯一。human=对外(显示,4 ui_lang:zh-CN/en/ja/zh-TW),llm=对内(LLM 感知,2 prompt_lang:zh/en)。severity=info|success|warn|error;surface=toast(瞬态)|health(常驻指示灯)|silent(只感知不显示);perceive=LLM 是否感知(默认 true=自我感知原则,纯 chrome 才 false 并在此注明理由)。占位符 {x} 发出时以同一组运行时参数替换两受众。ja/zh-TW 暂以 zh-CN 占位,待 scripts/translate-i18n.mjs(pro)回填。新增提示必须补齐全部受众/语言,否则 notice_i18n_complete 测试红。kind(可写/只读、移到何处等)拆成独立 code 而非参数,避免把已 ui_lang 本地化的文本注入 llm 的 prompt_lang 渲染(两轴串味)。",
+  "store.unavailable": {
+    "severity": "error",
+    "surface": "health",
+    "perceive": true,
+    "human": {
+      "zh-CN": "持久化打不开,记忆仅在内存、退出即丢失:{detail}",
+      "en": "Storage unavailable; memory is RAM-only and will be lost on exit: {detail}",
+      "ja": "永続化ストレージが開けません。記憶はメモリ内のみで、終了時に失われます:{detail}",
+      "zh-TW": "持久化打不開，記憶僅在記憶體、退出即丟失：{detail}"
+    },
+    "llm": {
+      "zh": "持久化不可用({detail})。你的记忆当前仅在内存,退出即丢失;应主动告知用户,并避免依赖历史记忆。",
+      "en": "Storage is unavailable ({detail}). Your memory is RAM-only and will be lost on exit; proactively inform the user and avoid relying on historical memory."
+    }
+  },
+  "store.write_failed": {
+    "severity": "error",
+    "surface": "health",
+    "perceive": true,
+    "human": {
+      "zh-CN": "持久化写入失败(累计 {count} 次):{last}",
+      "en": "Storage write failed ({count} times): {last}",
+      "ja": "永続化書き込み失敗(累計 {count} 回):{last}",
+      "zh-TW": "持久化寫入失敗（累計 {count} 次）：{last}"
+    },
+    "llm": {
+      "zh": "持久化写入已失败 {count} 次(最近:{last})。新记忆可能未落盘,谨慎对待本次会话的持久性。",
+      "en": "Storage writes have failed {count} times (latest: {last}). New memories may not be persisted; treat this session's durability with caution."
+    }
+  },
+  "llm.call_failed": {
+    "severity": "error",
+    "surface": "silent",
+    "perceive": true,
+    "human": {
+      "zh-CN": "模型调用失败:{detail}",
+      "en": "Model call failed: {detail}",
+      "ja": "モデル呼び出し失敗:{detail}",
+      "zh-TW": "模型調用失敗：{detail}"
+    },
+    "llm": {
+      "zh": "上一次模型调用失败({detail})。若为瞬时错误可重试。",
+      "en": "The previous model call failed ({detail}). Retry if this looks transient."
+    }
+  },
+  "loop.degenerate": {
+    "severity": "warn",
+    "surface": "silent",
+    "perceive": true,
+    "human": {
+      "zh-CN": "检测到回答高频重复,已收口",
+      "en": "Detected high-frequency repetition; wrapped up",
+      "ja": "高頻度の繰り返しを検出し、打ち切りました",
+      "zh-TW": "偵測到回答高頻重複，已收口"
+    },
+    "llm": {
+      "zh": "你连续多轮在重复几乎相同的内容(退化死循环),已被收口。下次遇到想不清的点,换个角度或直接动手(调用工具)推进,别原地打转。",
+      "en": "You repeated nearly identical output across several turns (a degenerate loop) and were wrapped up. Next time, when stuck, change the angle or just act (call a tool) instead of spinning in place."
+    }
+  },
+  "chat.cancelled": {
+    "severity": "info",
+    "surface": "silent",
+    "perceive": true,
+    "human": {
+      "zh-CN": "已终止本回合",
+      "en": "Turn terminated",
+      "ja": "このターンを中止しました",
+      "zh-TW": "已終止本回合"
+    },
+    "llm": {
+      "zh": "用户主动按了「终止」叫停了你当前这一回合。这不是出错——是用户想停下/改主意了。等用户的下一条消息再继续,别立刻重启刚才的动作。",
+      "en": "The user pressed Stop to terminate your current turn. This is not an error—the user wanted to halt or changed their mind. Wait for the user's next message before continuing; do not immediately restart what you were doing."
+    }
+  },
+  "artifact.closed": {
+    "severity": "info",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "造物窗口已关闭",
+      "en": "Artifact window closed",
+      "ja": "アーティファクトウィンドウを閉じました",
+      "zh-TW": "造物視窗已關閉"
+    },
+    "llm": {
+      "zh": "用户关闭了造物窗口,这个造物已经没了、端口不通——别再尝试用 artifact_command 操作它或往它发指令了(发了也到不了)。如果之后还需要,可以重新 render_artifact 造一个新的。这是硬性事实(系统检测,非你判断)。",
+      "en": "The user closed the artifact window. This artifact is gone and its port is dead—do NOT try to operate it via artifact_command or send it commands (they won't arrive). If you need one later, render_artifact a new one. This is a hard fact (system-detected, not your judgment)."
+    }
+  },
+  "tool.failed": {
+    "severity": "warn",
+    "surface": "silent",
+    "perceive": true,
+    "human": {
+      "zh-CN": "工具 {tool} 执行失败:{detail}",
+      "en": "Tool {tool} failed: {detail}",
+      "ja": "ツール {tool} の実行に失敗しました:{detail}",
+      "zh-TW": "工具 {tool} 執行失敗：{detail}"
+    },
+    "llm": {
+      "zh": "工具 {tool} 执行失败:{detail}。据此调整下一步,不要假定它成功了。",
+      "en": "Tool {tool} failed: {detail}. Adjust your next step accordingly; do not assume it succeeded."
+    }
+  },
+  "ui.panel_opened": {
+    "severity": "info",
+    "surface": "silent",
+    "perceive": true,
+    "human": {
+      "zh-CN": "{panel} 面板已打开",
+      "en": "{panel} panel opened",
+      "ja": "{panel} パネルが開きました",
+      "zh-TW": "{panel} 面板已開啟"
+    },
+    "llm": {
+      "zh": "{panel} 面板现在已打开(用户或你自己打开的)。",
+      "en": "The {panel} panel is now open (opened by the user or by you)."
+    }
+  },
+  "ui.panel_closed": {
+    "severity": "info",
+    "surface": "silent",
+    "perceive": true,
+    "human": {
+      "zh-CN": "{panel} 面板已关闭",
+      "en": "{panel} panel closed",
+      "ja": "{panel} パネルが閉じました",
+      "zh-TW": "{panel} 面板已關閉"
+    },
+    "llm": {
+      "zh": "{panel} 面板现在已关闭。",
+      "en": "The {panel} panel is now closed."
+    }
+  },
+  "connect.connected": {
+    "severity": "success",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "已连接到 {model}",
+      "en": "Connected to {model}",
+      "ja": "{model} に接続しました",
+      "zh-TW": "已連接到 {model}"
+    },
+    "llm": {
+      "zh": "你已连接到模型 {model},可以开始工作了。",
+      "en": "You are now connected to model {model} and can begin work."
+    }
+  },
+  "connect.failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "连接失败:{detail}",
+      "en": "Connection failed: {detail}",
+      "ja": "接続失敗:{detail}",
+      "zh-TW": "連線失敗：{detail}"
+    },
+    "llm": {
+      "zh": "上一次连接尝试失败({detail})。你当前可能尚未就绪;待用户重连后再开始工作。",
+      "en": "The last connection attempt failed ({detail}). You may not be ready yet; resume work after the user reconnects."
+    }
+  },
+  "connect.api_unreachable": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "API 无法连接,请检查地址与网络",
+      "en": "API unreachable; check the base URL and network",
+      "ja": "API に接続できません。アドレスとネットワークを確認してください",
+      "zh-TW": "API 無法連線，請檢查位址與網路"
+    },
+    "llm": {
+      "zh": "API 地址无法连接(网络或地址问题)。连接未建立。",
+      "en": "The API endpoint is unreachable (network or URL issue). The connection was not established."
+    }
+  },
+  "connect.api_auth_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "API 认证失败:密钥无效",
+      "en": "API authentication failed: invalid key",
+      "ja": "API 認証失敗: キーが無効です",
+      "zh-TW": "API 認證失敗：金鑰無效"
+    },
+    "llm": {
+      "zh": "API 认证失败(密钥无效)。连接未建立,需用户提供有效密钥。",
+      "en": "API authentication failed (invalid key). The connection was not established; the user must supply a valid key."
+    }
+  },
+  "connect.api_bad_response": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "API 返回格式异常",
+      "en": "API returned an unexpected format",
+      "ja": "API の応答形式が異常です",
+      "zh-TW": "API 回傳格式異常"
+    },
+    "llm": {
+      "zh": "API 返回了非预期的格式。该端点可能不兼容 OpenAI 接口。",
+      "en": "The API returned an unexpected format. The endpoint may not be OpenAI-compatible."
+    }
+  },
+  "connect.model_not_loaded": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "模型 {model} 未在 LM Studio 中加载",
+      "en": "Model {model} is not loaded in LM Studio",
+      "ja": "モデル {model} が LM Studio に読み込まれていません",
+      "zh-TW": "模型 {model} 未在 LM Studio 中載入"
+    },
+    "llm": {
+      "zh": "模型 {model} 尚未在 LM Studio 中加载。连接未建立,需用户先加载该模型。",
+      "en": "Model {model} is not loaded in LM Studio. The connection was not established; the user must load it first."
+    }
+  },
+  "connect.model_not_found": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "模型 {model} 不存在",
+      "en": "Model {model} not found",
+      "ja": "モデル {model} は存在しません",
+      "zh-TW": "模型 {model} 不存在"
+    },
+    "llm": {
+      "zh": "模型 {model} 在该端点不存在。连接未建立,需用户改用可用模型。",
+      "en": "Model {model} does not exist on this endpoint. The connection was not established; the user must pick an available model."
+    }
+  },
+  "connect.model_error": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "模型初始化错误:{detail}",
+      "en": "Model initialization error: {detail}",
+      "ja": "モデル初期化エラー:{detail}",
+      "zh-TW": "模型初始化錯誤：{detail}"
+    },
+    "llm": {
+      "zh": "模型初始化出错({detail})。连接未建立。",
+      "en": "Model initialization failed ({detail}). The connection was not established."
+    }
+  },
+  "connect.scan_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "扫描模型失败:{detail}",
+      "en": "Model scan failed: {detail}",
+      "ja": "モデルのスキャンに失敗しました:{detail}",
+      "zh-TW": "掃描模型失敗：{detail}"
+    },
+    "llm": {
+      "zh": "扫描可用模型列表失败({detail})。",
+      "en": "Failed to scan the available model list ({detail})."
+    }
+  },
+  "connect.api_base_empty": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "请先填写 API 地址",
+      "en": "Enter the API base URL first",
+      "ja": "最初に API アドレスを入力してください",
+      "zh-TW": "請先填寫 API 位址"
+    }
+  },
+  "connect.scan_empty": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "未扫描到任何模型",
+      "en": "No models found",
+      "ja": "モデルがスキャンされませんでした",
+      "zh-TW": "未掃描到任何模型"
+    }
+  },
+  "connect.scan_found": {
+    "severity": "success",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "扫描到 {n} 个模型",
+      "en": "Found {n} models",
+      "ja": "{n} 個のモデルが見つかりました",
+      "zh-TW": "掃描到 {n} 個模型"
+    }
+  },
+  "connect.cancelled": {
+    "severity": "info",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "已取消连接",
+      "en": "Connection cancelled",
+      "ja": "接続がキャンセルされました",
+      "zh-TW": "已取消連線"
+    }
+  },
+  "project.list_read_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "读取项目列表失败:{detail}",
+      "en": "Failed to read project list: {detail}",
+      "ja": "プロジェクトリストの読み込みに失敗しました:{detail}",
+      "zh-TW": "讀取專案列表失敗：{detail}"
+    },
+    "llm": {
+      "zh": "读取项目列表失败({detail})。项目相关信息可能不完整。",
+      "en": "Failed to read the project list ({detail}). Project-related information may be incomplete."
+    }
+  },
+  "project.switched": {
+    "severity": "success",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "已切换到 {name}",
+      "en": "Switched to {name}",
+      "ja": "{name} に切り替えました",
+      "zh-TW": "已切換到 {name}"
+    },
+    "llm": {
+      "zh": "用户切换到了项目「{name}」,你现在工作在该项目的上下文中。",
+      "en": "User switched to project \"{name}\"; you now operate in that project's context."
+    }
+  },
+  "project.switch_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "切换项目失败:{detail}",
+      "en": "Failed to switch project: {detail}",
+      "ja": "プロジェクトの切り替えに失敗しました:{detail}",
+      "zh-TW": "切換專案失敗：{detail}"
+    },
+    "llm": {
+      "zh": "切换项目失败({detail})。当前项目上下文未改变。",
+      "en": "Failed to switch project ({detail}). The current project context is unchanged."
+    }
+  },
+  "project.created": {
+    "severity": "success",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "已创建项目 {name}",
+      "en": "Created project {name}",
+      "ja": "プロジェクト {name} を作成しました",
+      "zh-TW": "已建立專案 {name}"
+    },
+    "llm": {
+      "zh": "已创建项目「{name}」并切换过去,你现在工作在该项目的上下文中。",
+      "en": "Project \"{name}\" was created and is now active; you operate in its context."
+    }
+  },
+  "project.create_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "创建项目失败:{detail}",
+      "en": "Failed to create project: {detail}",
+      "ja": "プロジェクトの作成に失敗しました:{detail}",
+      "zh-TW": "建立專案失敗：{detail}"
+    },
+    "llm": {
+      "zh": "创建项目失败({detail})。项目未建立。",
+      "en": "Failed to create the project ({detail}). It was not created."
+    }
+  },
+  "project.none_active": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "当前没有激活的项目",
+      "en": "No active project",
+      "ja": "現在アクティブなプロジェクトはありません",
+      "zh-TW": "目前沒有啟用的專案"
+    }
+  },
+  "project.dir_added_writable": {
+    "severity": "success",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "已添加可写目录",
+      "en": "Added a writable directory",
+      "ja": "書き込み可能なディレクトリを追加しました",
+      "zh-TW": "已新增可寫入目錄"
+    },
+    "llm": {
+      "zh": "用户为当前项目新增了一个可写目录,你的可读写范围已扩大。",
+      "en": "The user added a writable directory to the current project; your read/write scope has expanded."
+    }
+  },
+  "project.dir_added_readonly": {
+    "severity": "success",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "已添加只读目录",
+      "en": "Added a read-only directory",
+      "ja": "読み取り専用ディレクトリを追加しました",
+      "zh-TW": "已新增唯讀目錄"
+    },
+    "llm": {
+      "zh": "用户为当前项目新增了一个只读目录,你的可读范围已扩大(该目录不可写)。",
+      "en": "The user added a read-only directory to the current project; your readable scope has expanded (that directory is not writable)."
+    }
+  },
+  "project.dir_add_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "添加目录失败:{detail}",
+      "en": "Failed to add directory: {detail}",
+      "ja": "ディレクトリの追加に失敗しました:{detail}",
+      "zh-TW": "新增目錄失敗：{detail}"
+    },
+    "llm": {
+      "zh": "添加目录失败({detail})。项目目录范围未改变。",
+      "en": "Failed to add the directory ({detail}). The project's directory scope is unchanged."
+    }
+  },
+  "project.net_grant_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "网络主机授权保存失败:{detail}(下次访问会再次弹窗)",
+      "en": "Failed to save network host grant: {detail} (you will be asked again next time)",
+      "ja": "ネットワークホスト許可の保存に失敗しました:{detail}(次回再度確認されます)",
+      "zh-TW": "網路主機授權儲存失敗:{detail}(下次存取會再次彈窗)"
+    },
+    "llm": {
+      "zh": "用户已同意访问该内网主机,但授权持久化失败({detail})——本次已放行,下次同主机仍会要求授权。",
+      "en": "The user approved access to this intranet host, but persisting the grant failed ({detail}). This call was allowed; the same host will require authorization again next time."
+    }
+  },
+  "project.dir_moved_to_writable": {
+    "severity": "success",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "已将目录移到可写区",
+      "en": "Moved a directory to writable",
+      "ja": "ディレクトリを書き込み可能領域に移動しました",
+      "zh-TW": "已將目錄移到可寫入區"
+    },
+    "llm": {
+      "zh": "用户把一个目录从只读改为可写,你现在对它有读写权限。",
+      "en": "The user moved a directory from read-only to writable; you now have read/write access to it."
+    }
+  },
+  "project.dir_moved_to_readonly": {
+    "severity": "success",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "已将目录移到只读区",
+      "en": "Moved a directory to read-only",
+      "ja": "ディレクトリを読み取り専用領域に移動しました",
+      "zh-TW": "已將目錄移到唯讀區"
+    },
+    "llm": {
+      "zh": "用户把一个目录从可写改为只读,你现在对它只有读权限(不可写)。",
+      "en": "The user moved a directory from writable to read-only; you now have read-only access to it (no writing)."
+    }
+  },
+  "project.dir_move_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "移动目录失败:{detail}",
+      "en": "Failed to move directory: {detail}",
+      "ja": "ディレクトリの移動に失敗しました:{detail}",
+      "zh-TW": "移動目錄失敗:{detail}"
+    },
+    "llm": {
+      "zh": "移动目录失败({detail})。目录的读写归类未改变。",
+      "en": "Failed to move the directory ({detail}). Its read/write classification is unchanged."
+    }
+  },
+  "project.dir_removed": {
+    "severity": "info",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "已移除目录",
+      "en": "Removed a directory",
+      "ja": "ディレクトリを削除しました",
+      "zh-TW": "已移除目錄"
+    },
+    "llm": {
+      "zh": "用户从当前项目移除了一个目录,你的可访问范围已缩小,不要再假定能访问它。",
+      "en": "The user removed a directory from the current project; your accessible scope has shrunk. Do not assume you can still access it."
+    }
+  },
+  "project.dir_remove_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "移除目录失败:{detail}",
+      "en": "Failed to remove directory: {detail}",
+      "ja": "ディレクトリの削除に失敗しました:{detail}",
+      "zh-TW": "移除目錄失敗:{detail}"
+    },
+    "llm": {
+      "zh": "移除目录失败({detail})。项目目录范围未改变。",
+      "en": "Failed to remove the directory ({detail}). The project's directory scope is unchanged."
+    }
+  },
+  "project.min_one_writable": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "至少保留一个可写目录",
+      "en": "Keep at least one writable directory",
+      "ja": "少なくとも1つの書き込み可能ディレクトリを保持してください",
+      "zh-TW": "至少保留一個可寫入目錄"
+    }
+  },
+  "project.id_required": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "请填写项目 ID",
+      "en": "Enter a project ID",
+      "ja": "プロジェクトIDを入力してください",
+      "zh-TW": "請填寫專案 ID"
+    }
+  },
+  "project.name_required": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "请填写项目名称",
+      "en": "Enter a project name",
+      "ja": "プロジェクト名を入力してください",
+      "zh-TW": "請填寫專案名稱"
+    }
+  },
+  "project.min_writable_required": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "请至少添加一个可写目录",
+      "en": "Add at least one writable directory",
+      "ja": "少なくとも1つの書き込み可能ディレクトリを追加してください",
+      "zh-TW": "請至少添加一個可寫入目錄"
+    }
+  },
+  "project.navigate_countdown": {
+    "severity": "info",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "{remaining}s 后切换到 {name}",
+      "en": "Switching to {name} in {remaining}s",
+      "ja": "{remaining}秒後に{name}に切り替えます",
+      "zh-TW": "{remaining}s 後切換到 {name}"
+    }
+  },
+  "chat.not_connected": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "请先连接模型",
+      "en": "Connect to a model first",
+      "ja": "先にモデルを接続してください",
+      "zh-TW": "請先連接模型"
+    }
+  },
+  "chat.stream_idle_soft": {
+    "severity": "info",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "已等待 {s}s,仍在生成中…",
+      "en": "Waited {s}s, still generating…",
+      "ja": "{s}秒待機中、まだ生成中です…",
+      "zh-TW": "已等待 {s}s，仍在生成中…"
+    }
+  },
+  "chat.stream_idle_hard": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "已等待 {s}s 仍无响应,可能较慢",
+      "en": "No response after {s}s; it may be slow",
+      "ja": "{s}秒待機しても応答がありません。速度が遅い可能性があります",
+      "zh-TW": "已等待 {s}s 仍無回應，可能較慢"
+    }
+  },
+  "chat.stream_error": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "对话出错:{detail}",
+      "en": "Chat error: {detail}",
+      "ja": "会話エラー:{detail}",
+      "zh-TW": "對話出錯:{detail}"
+    }
+  },
+  "chat.reset": {
+    "severity": "success",
+    "surface": "toast",
+    "perceive": false,
+    "human": {
+      "zh-CN": "已开启新会话",
+      "en": "Started a new session",
+      "ja": "新しいセッションを開始しました",
+      "zh-TW": "已開啟新會話"
+    }
+  },
+  "chat.reset_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "重置会话失败:{detail}",
+      "en": "Failed to reset session: {detail}",
+      "ja": "セッションのリセットに失敗しました:{detail}",
+      "zh-TW": "重設會話失敗:{detail}"
+    },
+    "llm": {
+      "zh": "重置/新建会话失败({detail})。当前仍处于原会话。",
+      "en": "Failed to reset/start a new session ({detail}). You remain in the current session."
+    }
+  },
+  "chat.model_no_vision": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "当前模型不支持视觉,图片未加入",
+      "en": "Current model has no vision; image not added",
+      "ja": "現在のモデルは視覚をサポートしていないため、画像は追加されませんでした",
+      "zh-TW": "目前模型不支援視覺，圖片未加入"
+    },
+    "llm": {
+      "zh": "用户尝试附带一张图片,但当前模型不支持视觉,图片未被加入。若需要可建议用户改用支持视觉的模型。",
+      "en": "The user tried to attach an image, but the current model has no vision support, so the image was not added. You may suggest switching to a vision-capable model."
+    }
+  },
+  "tools.list_read_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "读取工具列表失败:{detail}",
+      "en": "Failed to read tool list: {detail}",
+      "ja": "ツールリストの読み取りに失敗しました:{detail}",
+      "zh-TW": "讀取工具列表失敗:{detail}"
+    },
+    "llm": {
+      "zh": "界面读取工具列表失败({detail})。你的实际可用工具以后端为准,不受此影响。",
+      "en": "The UI failed to read the tool list ({detail}). Your actually available tools are governed by the backend and are unaffected."
+    }
+  },
+  "tools.toggle_save_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "human": {
+      "zh-CN": "保存工具开关失败:{detail}",
+      "en": "Failed to save tool toggle: {detail}",
+      "ja": "ツールのオン/オフの保存に失敗しました:{detail}",
+      "zh-TW": "儲存工具開關失敗:{detail}"
+    },
+    "llm": {
+      "zh": "保存工具启用状态失败({detail})。工具启用集合可能未更新。",
+      "en": "Failed to save the tool enable state ({detail}). The set of enabled tools may not have been updated."
+    }
+  },
+  "task.completed": {
+    "severity": "success",
+    "surface": "toast",
+    "perceive": false,
+    "_perceive_note": "perceive=false:后台任务的对内感知由 Supervisor 回合(ingest 完成消息跑 agent_loop)负责,此处只补对外 toast,避免双重告知。",
+    "human": {
+      "zh-CN": "后台任务完成:{label}",
+      "en": "Background task done: {label}",
+      "ja": "バックグラウンドタスクが完了しました:{label}",
+      "zh-TW": "後台任務完成:{label}"
+    }
+  },
+  "task.failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": false,
+    "_perceive_note": "perceive=false:同 task.completed,对内由 Supervisor 回合负责。",
+    "human": {
+      "zh-CN": "后台任务失败:{label}",
+      "en": "Background task failed: {label}",
+      "ja": "バックグラウンドタスクが失敗しました:{label}",
+      "zh-TW": "後台任務失敗:{label}"
+    }
+  },
+  "decision.ack_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "_note": "用户裁决(授权/shell 审批弹窗)两次投递均失败。后端 request_decision 超时按拒绝,故丢 ack = 用户点了允许却被当拒绝——绝不能静默。对内感知让 AI 知道这是通信失败而非用户拒绝。",
+    "human": {
+      "zh-CN": "你的裁决({decision})未能送达,已重试仍失败。等待将超时并按「拒绝」处理,请重试该操作。",
+      "en": "Your decision ({decision}) could not be delivered after a retry. The pending action will time out as denied; please retry the operation.",
+      "ja": "あなたの裁定({decision})は再試行後も送達できませんでした。待機中の操作はタイムアウトで拒否扱いになります。操作をやり直してください。",
+      "zh-TW": "你的裁決({decision})未能送達,已重試仍失敗。等待將逾時並按「拒絕」處理,請重試該操作。"
+    },
+    "llm": {
+      "zh": "用户在授权弹窗做出的裁决({decision})未能送达脊柱(IPC 投递两次失败),等待会超时并按拒绝处理。这是通信失败而非用户拒绝;若随后动作被拒,应向用户说明并重试该动作。",
+      "en": "The user's decision ({decision}) from the authorization dialog failed to reach the spine (IPC delivery failed twice); the wait will time out as a denial. This is a transport failure, not a user refusal; if the action is subsequently denied, explain and retry it."
+    }
+  },
+  "settings.recall_failed": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": false,
+    "_perceive_note": "perceive=false:设置面板局部读失败,与 AI 行为无关;只提醒用户当前显示可能非真值。",
+    "human": {
+      "zh-CN": "部分设置读取失败,面板显示的可能不是当前真值。",
+      "en": "Some settings failed to load; values shown may not reflect the current state.",
+      "ja": "一部の設定の読み込みに失敗しました。表示中の値は現在の実際の値と異なる可能性があります。",
+      "zh-TW": "部分設定讀取失敗,面板顯示的可能不是當前真值。"
+    }
+  },
+  "settings.save_failed": {
+    "severity": "error",
+    "surface": "toast",
+    "perceive": true,
+    "_note": "用户改了设置但持久化失败(如隐私目录列表)——用户以为已生效是隐私/信任洞,双受众告知。",
+    "human": {
+      "zh-CN": "设置保存失败,改动未生效:{detail}",
+      "en": "Failed to save the setting; the change did not take effect: {detail}",
+      "ja": "設定の保存に失敗し、変更は反映されていません:{detail}",
+      "zh-TW": "設定儲存失敗,改動未生效:{detail}"
+    },
+    "llm": {
+      "zh": "用户刚在设置面板做的修改保存失败({detail}),实际配置仍是旧值;若用户随后的请求依赖该设置(如隐私目录保护),按旧值行事并提醒用户重试。",
+      "en": "A settings change the user just made failed to persist ({detail}); the effective config is still the old value. If subsequent requests depend on it (e.g. privacy folders), act on the old value and remind the user to retry."
+    }
+  },
+  "ui.report_failed": {
+    "severity": "warn",
+    "surface": "toast",
+    "perceive": false,
+    "_perceive_note": "perceive=false:上报通道本身已失败,感知半无法送达;只对外提示一次(前端去重)。",
+    "human": {
+      "zh-CN": "界面状态上报失败,AI 对界面的感知可能短暂失真。",
+      "en": "UI state reporting failed; the AI's awareness of the interface may be briefly out of sync.",
+      "ja": "UI 状態の報告に失敗しました。AI のインターフェース認識が一時的にずれる可能性があります。",
+      "zh-TW": "介面狀態上報失敗,AI 對介面的感知可能短暫失真。"
+    }
+  }
+}

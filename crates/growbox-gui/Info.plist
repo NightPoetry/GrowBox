@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- 网页调试(Phase 2):注入被调试页(本地 dev server)的套索运行时用 fetch 把框选结果 POST 到
+       本机回环端口(见 web_debug.rs / web_debug_runtime.js)。WKWebView 默认 ATS 会把这种 http 请求
+       判为不安全而拦掉(fetch 报 TypeError: Load failed)。NSAllowsLocalNetworking 放行本机/回环
+       (localhost / 127.0.0.1 / .local),不放开任意外网 http,范围最小。 -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+</dict>
+</plist>

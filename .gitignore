@@ -1,0 +1,59 @@
+# === 构建产物 ===
+target/
+dist/
+frontend/dist/
+dotslash-cache/
+*.log
+
+# === 系统 / 编辑器 ===
+.DS_Store
+.idea/
+.git/
+*.swp
+
+# === 依赖 ===
+node_modules/
+
+# === 运行时 / 本地状态 ===
+.growbox/
+.growbox-runtime/
+.claude/
+
+# === 私密 / 凭据(绝不入库)===
+.env
+*.key
+*secret*
+*credentials*
+
+# === 交接 / 临时文档(含 key、内部进度,私密)===
+交接报告.md
+现在交接文档.md
+发给Claude.md交接.md
+
+# === 大体积参考(旧代码归档 / 本地参考资料,本地保留、不入库)===
+Old代码-V3active/
+项目代码/
+设计文档/Old/
+过时文档/
+参考资料/
+
+# === 私密文档保险箱:明文不进 git,只有加密后的 private/docs.tar.gz.enc 进 git ===
+# 这些是纯 AI 会话内部产物(记忆镜像 / 历史交接 / 决策日志原话 / 含 key 的交接报告),
+# 明文含外部工具参考与凭据,不可公开。经 scripts/private-docs.sh 打包加密成 private/ 下的
+# 不透明 blob 随仓库走(密文公开无害);解密口令 .private-docs.key 只在本地(*.key 已兜底)。
+设计文档/AI记忆快照/
+设计文档/History/
+设计文档/用户决策/决策日志.md
+.private-docs.key
+private/vault-manifest.full.local.md5
+# 注:交接报告.md 已在上方"交接/临时文档"段排除;vault-manifest.full.local.md5=带文件名的本地核对清单(含敏感名,不公开)
+
+# === prompts/ 现为当前核心源(tools.i18n.json / system.*.md 等被 include_str! 编入),纳入追踪 ===
+# (历史曾因"旧私密提示词"排除;现已是活跃源码。真凭据仍由上方 *.key/*secret* 等规则兜底)
+
+# 本地 e5 模型(约 470MB,随 full 包,不入库)
+crates/growbox-gui/models/
+assets/models/
+
+# 本地工具(rust-analyzer 等二进制,测试用,不入库)
+.tooling/

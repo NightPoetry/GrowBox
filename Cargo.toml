@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/growbox-core",
+    "crates/growbox-llm",
+    "crates/growbox-safety",
+    "crates/growbox-memory",
+    "crates/growbox-learn",
+    "crates/growbox-gui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.75"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+tokio-stream = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tempfile = "3"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+regex = "1"
+# 代码搜索遍历(二期 A3 code_search):ripgrep 自己的遍历库,纯 Rust 无原生依赖(守跨平台红线),
+# 尊重 .gitignore/.ignore/hidden(真实仓库不去搜 target/、node_modules/)+ 自带 glob/type 过滤。
+ignore = "0.4"
+once_cell = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+# gzip 解压(rust-analyzer release 资产 .gz):默认 miniz_oxide 纯 Rust 后端,无原生依赖(守跨平台红线)。
+flate2 = "1"
+# HTML → 可读纯文本(web_fetch 正文化):html5ever 系纯 Rust,无原生依赖(守跨平台红线)。
+html2text = { version = "0.17", default-features = false }
+parking_lot = "0.12"
+redb = "4"
+tokio-util = { version = "0.7", features = ["rt"] }
+# Unix 进程组信号(shell 执行器超时/取消时杀整组 killpg,含 `cmd &` 起的后台子进程)。
+# libc 几乎被所有 crate 间接依赖,声明无新增体积;仅用 killpg(-pgid, SIGKILL)。
+libc = "0.2"
+# 本地嵌入(纯 Rust、无原生依赖,守跨平台红线)。
+# candle 固定 0.9:0.10 的 candle-core 硬依赖带 onig(原生 oniguruma)的 tokenizers,0.9 不拉 → 全程纯 Rust。
+# tokenizers 我方直依赖关掉 onig 默认,走 fancy-regex 纯 Rust 后端。hf-hub 走 rustls。
+candle-core = "0.9"
+candle-nn = "0.9"
+candle-transformers = "0.9"
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
+hf-hub = { version = "0.4", default-features = false, features = ["tokio", "rustls-tls"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

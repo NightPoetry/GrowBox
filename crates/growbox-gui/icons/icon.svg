@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#123B34"/>
+      <stop offset="1" stop-color="#08140F"/>
+    </linearGradient>
+    <linearGradient id="pillar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7BF3C2"/>
+      <stop offset="0.5" stop-color="#3FBE93"/>
+      <stop offset="1" stop-color="#1F8A66"/>
+    </linearGradient>
+    <radialGradient id="node" cx="0.35" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#D8FFEE"/>
+      <stop offset="0.55" stop-color="#79E7BE"/>
+      <stop offset="1" stop-color="#2FA079"/>
+    </radialGradient>
+    <radialGradient id="hot" cx="0.4" cy="0.4" r="0.7">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.5" stop-color="#C9FFE8"/>
+      <stop offset="1" stop-color="#54D8A8"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 背景圆角方(macOS 风格) -->
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#bg)"/>
+
+  <!-- 边:节点 -> 中央脊柱(画在脊柱与节点之下,似从脊柱发散) -->
+  <g stroke="#6FE3BE" stroke-width="4" stroke-opacity="0.32" stroke-linecap="round">
+    <line x1="300" y1="320" x2="512" y2="330"/>
+    <line x1="240" y1="470" x2="512" y2="460"/>
+    <line x1="320" y1="600" x2="512" y2="590"/>
+    <line x1="250" y1="720" x2="512" y2="690"/>
+    <line x1="430" y1="262" x2="512" y2="320"/>
+    <line x1="406" y1="420" x2="512" y2="430"/>
+    <line x1="412" y1="560" x2="512" y2="560"/>
+    <line x1="384" y1="700" x2="512" y2="680"/>
+    <line x1="600" y1="300" x2="512" y2="330"/>
+    <line x1="662" y1="442" x2="512" y2="450"/>
+    <line x1="620" y1="580" x2="512" y2="560"/>
+    <line x1="680" y1="700" x2="512" y2="680"/>
+    <line x1="742" y1="362" x2="512" y2="400"/>
+    <line x1="800" y1="520" x2="512" y2="520"/>
+    <line x1="760" y1="660" x2="512" y2="640"/>
+    <line x1="520" y1="232" x2="512" y2="310"/>
+    <line x1="512" y1="792" x2="512" y2="700"/>
+  </g>
+
+  <!-- 节点间的网状连线(mesh) -->
+  <g stroke="#6FE3BE" stroke-width="3.5" stroke-opacity="0.24" stroke-linecap="round">
+    <line x1="300" y1="320" x2="430" y2="262"/>
+    <line x1="430" y1="262" x2="600" y2="300"/>
+    <line x1="600" y1="300" x2="742" y2="362"/>
+    <line x1="320" y1="600" x2="412" y2="560"/>
+    <line x1="620" y1="580" x2="800" y2="520"/>
+    <line x1="240" y1="470" x2="320" y2="600"/>
+    <line x1="680" y1="700" x2="760" y2="660"/>
+    <line x1="662" y1="442" x2="620" y2="580"/>
+    <line x1="250" y1="720" x2="384" y2="700"/>
+    <line x1="800" y1="520" x2="760" y2="660"/>
+  </g>
+
+  <!-- 中央脊柱(时间线主轴) -->
+  <rect x="470" y="300" width="84" height="420" rx="42" fill="url(#pillar)"/>
+  <!-- 脊柱分段刻度 -->
+  <g stroke="#0C3B2C" stroke-opacity="0.45" stroke-width="6" stroke-linecap="round">
+    <line x1="486" y1="392" x2="538" y2="392"/>
+    <line x1="486" y1="470" x2="538" y2="470"/>
+    <line x1="486" y1="548" x2="538" y2="548"/>
+    <line x1="486" y1="626" x2="538" y2="626"/>
+  </g>
+
+  <!-- 普通节点 -->
+  <g stroke="#0E3B2D" stroke-opacity="0.35" stroke-width="3">
+    <circle cx="300" cy="320" r="26" fill="url(#node)"/>
+    <circle cx="240" cy="470" r="20" fill="url(#node)"/>
+    <circle cx="250" cy="720" r="18" fill="url(#node)"/>
+    <circle cx="430" cy="262" r="22" fill="url(#node)"/>
+    <circle cx="406" cy="420" r="16" fill="url(#node)"/>
+    <circle cx="412" cy="560" r="24" fill="url(#node)"/>
+    <circle cx="384" cy="700" r="20" fill="url(#node)"/>
+    <circle cx="662" cy="442" r="18" fill="url(#node)"/>
+    <circle cx="680" cy="700" r="20" fill="url(#node)"/>
+    <circle cx="742" cy="362" r="22" fill="url(#node)"/>
+    <circle cx="760" cy="660" r="16" fill="url(#node)"/>
+    <circle cx="520" cy="232" r="18" fill="url(#node)"/>
+    <circle cx="512" cy="792" r="20" fill="url(#node)"/>
+  </g>
+
+  <!-- 热节点(带光晕) -->
+  <g>
+    <circle cx="320" cy="600" r="66" fill="#7BF3C2" fill-opacity="0.16"/>
+    <circle cx="320" cy="600" r="45" fill="#7BF3C2" fill-opacity="0.22"/>
+    <circle cx="320" cy="600" r="30" fill="url(#hot)"/>
+    <circle cx="600" cy="300" r="54" fill="#7BF3C2" fill-opacity="0.16"/>
+    <circle cx="600" cy="300" r="37" fill="#7BF3C2" fill-opacity="0.22"/>
+    <circle cx="600" cy="300" r="24" fill="url(#hot)"/>
+    <circle cx="620" cy="580" r="62" fill="#7BF3C2" fill-opacity="0.16"/>
+    <circle cx="620" cy="580" r="42" fill="#7BF3C2" fill-opacity="0.22"/>
+    <circle cx="620" cy="580" r="28" fill="url(#hot)"/>
+    <circle cx="800" cy="520" r="58" fill="#7BF3C2" fill-opacity="0.16"/>
+    <circle cx="800" cy="520" r="40" fill="#7BF3C2" fill-opacity="0.22"/>
+    <circle cx="800" cy="520" r="26" fill="url(#hot)"/>
+  </g>
+</svg>
