@@ -1,0 +1,107 @@
+name: Package
+
+# 多端打包(未签名,lite 变体——不随包 e5 模型,首次运行联网下载)。
+#   - 手动触发(workflow_dispatch):产出三端安装包作为 run 的 artifact,不发布 Release。
+#   - 推送 v* 标签(如 v0.1.0):产出三端安装包并创建/更新对应 GitHub Release。
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+# 建 Release 需要写 contents 权限。
+permissions:
+  contents: write
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS:一个通用(universal)二进制覆盖 Apple Silicon + Intel,出 .dmg。
+          - os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            tauri-args: --target universal-apple-darwin
+          # Linux:出 .deb + .AppImage(跳过 rpm:ubuntu runner 无 rpmbuild,会失败)。
+          - os: ubuntu-22.04
+            rust-targets: ''
+            tauri-args: --bundles deb,appimage
+          # Windows:出 NSIS 安装器(.exe);bundler 自动下载 NSIS,比 WiX/MSI 在 CI 更稳。
+          - os: windows-latest
+            rust-targets: ''
+            tauri-args: --bundles nsis
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri v2 在 Linux 上链接 webkit2gtk-4.1 等系统库(同测试 CI)。
+      - name: Install Tauri v2 system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential curl wget file
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # macOS universal 需要两个目标三元组都装上。
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pkg-${{ matrix.os }}
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: crates/growbox-gui/frontend/package-lock.json
+
+      # tauri-build 编译期需要 frontend/dist(不入库),先构建前端。
+      - name: Build frontend
+        working-directory: crates/growbox-gui/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build & bundle (Tauri)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # tauri.conf.json 在此目录;cargo tauri build 从这里跑(工作区共用根 target/)。
+          projectPath: crates/growbox-gui
+          args: ${{ matrix.tauri-args }}
+          # 仅在 v* 标签触发时创建/更新 Release;手动触发 tagName 为空 → 只构建不发布。
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('GrowBox {0}', github.ref_name) || '' }}
+          releaseBody: "未签名安装包。首次运行会自动下载 e5 嵌入模型(multilingual-e5-small,约 470MB,来自 HuggingFace),请确保网络可畅通访问。"
+          releaseDraft: false
+          prerelease: false
+
+      # 手动触发(非 tag):把安装包作为 artifact 上传(tag 触发已进 Release,不重复)。
+      - name: Upload installers as artifacts (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: growbox-${{ matrix.os }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/nsis/*.exe

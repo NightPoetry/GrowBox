@@ -33,10 +33,12 @@ jobs:
             libssl-dev \
             build-essential curl wget file
 
-      - name: Install Rust (stable + clippy)
+      - name: Install Rust (stable + clippy + rust-analyzer)
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          # rust-analyzer:lsp 集成测试需要一个真 rust-analyzer 二进制(本地走 .tooling/,不入库);
+          # 在 CI 用 rustup 组件提供,并经 GROWBOX_LSP_RUST_ANALYZER 指给测试,避免它去 GitHub 下载。
+          components: clippy, rust-analyzer
 
       # 缓存 target/ 与 cargo registry,后续跑大幅提速(candle/arroy/tauri 编译较重)。
       - uses: Swatinem/rust-cache@v2
@@ -60,6 +62,10 @@ jobs:
       # 全工作区 lint:当前 0 警告,用 -D warnings 钉死,新警告即红。
       - name: Clippy (deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # 把 CI 的 rust-analyzer 路径指给 lsp 测试(env 覆盖优先于 PATH/下载),让它用现成的、不联网下载。
+      - name: Point LSP tests at rust-analyzer
+        run: echo "GROWBOX_LSP_RUST_ANALYZER=$(rustup which rust-analyzer)" >> "$GITHUB_ENV"
 
       # 全工作区单测。打真 API / 真 e5 模型的 live_* 与 e2e 测试均 #[ignore],CI 不跑
       # (它们需要 DEEPSEEK_API_KEY 与 ~470MB 模型);此处跑的是用 mock 的确定性单测/集成测试。

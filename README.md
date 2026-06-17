@@ -203,6 +203,12 @@ app(gui)  Agent 循环脊柱 + 执行器注册表 + Tauri + 前端(SolidJS)
   `VectorIndex` trait 后面,可换。
 - **本地 / 远程嵌入双通道**:本地默认走 candle 跑 `multilingual-e5-small`,另留 OpenAI 兼容的远程嵌入槽。
 
+> ⚠️ **首次运行需联网下载嵌入模型**:RAG 第一层用的本地嵌入模型 `multilingual-e5-small`(约 470MB)
+> 默认不随安装包,**首次运行时自动从 HuggingFace 下载**(`huggingface.co`,服务器在中国大陆境外)。
+> 因此第一次启动前请准备好**能畅通访问 HuggingFace 的网络**(必要时配好代理),否则模型拉取会失败、
+> 语义检索不可用。模型下载一次后本地缓存,后续启动无需联网。若要离线分发,可用
+> `scripts/build-official.sh --with-model` 出"随包模型"的 full 变体(把权重打进安装包)。
+
 正文与向量两半都做到磁盘原生,内存占用 = 工作集,与总记忆量解耦——这是"无界记忆"成立的前提。
 
 ---
