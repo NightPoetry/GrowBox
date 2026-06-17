@@ -31,6 +31,10 @@
 
 ### subconscious.rs —— 潜意识接口
 - `cosine` 工具 + `Subconscious` trait(embed_query/embed_passage/judge_relevant/embedding_version),由 gui 的 bridge 接到真 LLM/Embedder;测试用 mock。
+- **`chunk_doc`(2026-06-17,文档破碎化)**:让 LLM 判长文破点(默认实现 `greedy_chunk_bounds` 贪心兜底);`greedy_chunk_bounds` crate 级导出。
+
+### 文档破碎化(2026-06-17)—— 长文投喂的检索盲区
+- 投喂整篇长文 = 一个大节点一条 e5 向量 → 稀释/截断 → 窄问 RAG 必漏、染 Deep 后精确层也漏。修法:入场按 `chunk_min_chars`(默认 1500)标 `needs_chunk` → idle `chunk_while_idle`(排在补嵌前)按句破成小块、各自成向量;父节点标 `chunked` 退出索引/补嵌/线性扫。**LLM 只判破点不碰文本**,Rust 精确拼接保真。**完整 as-built 见 [文档破碎化-长文检索盲区](文档破碎化-长文检索盲区.md)**。
 
 ### memory.rs —— 统一入口 + 分层检索
 - `Memory::new()`(纯内存,HnswIndex)/ `Memory::open(store, index_dir)`(磁盘:时间线惰性化 + ArroyIndex,打开失败回退 HNSW)。
@@ -66,8 +70,8 @@
 redb 4、**arroy 0.6.4**、**heed 0.22.1**、rand 0.8、instant-distance 0.6.1、sha2、serde/serde_json、async-trait。
 **为什么 arroy 而非 hannoy**:同 Meilisearch 团队/同 LMDB 家族/同样磁盘原生,但 arroy 更成熟(0.6.x、39 万下载、多年生产、版本干净),hannoy 更快但仍 0.1.x;按"依赖须知名成熟"硬规矩选 arroy,seam 留着日后可换。见 `决策日志.md` 2026-06-01 + 记忆 `prefer-well-known-verified-deps`。
 
-## 现状(P3 + P4 + P5 + 精确层阶段4 全完成)
-memory crate **65 单测绿**(含 arroy 落盘/重开 + context 6 + 组装集成 2 + P5 碎片/做梦/疲劳/睡眠/nap 8 + 阶段4:secondary 单测5 / store jumps / 强制跳转召回·持久·拒绝 / 二级远处拉近端到端 / nap 清二级留强制)。正文(P3d)+ 向量(arroy)两半磁盘原生 → "无界不全驻 RAM"达成;P4 上下文组装层后端 + P5 维护 + **阶段4 二级索引(远处拉近)+ 强制跳转指针(历史引用)**全落地。精确层五件套(指针/染色/缓存/二级索引+碎片/维护)全齐。
+## 现状(P3 + P4 + P5 + 精确层阶段4 全完成;2026-06-17 增文档破碎化)
+memory crate **120 单测绿**(含 arroy 落盘/重开 + context 6 + 组装集成 2 + P5 碎片/做梦/疲劳/睡眠/nap 8 + 阶段4:secondary 单测5 / store jumps / 强制跳转召回·持久·拒绝 / 二级远处拉近端到端 / nap 清二级留强制 + **文档破碎化 4:dream-board 回归 / split_sentences 还原 / 结构化 kind 豁免 / greedy**)。正文(P3d)+ 向量(arroy)两半磁盘原生 → "无界不全驻 RAM"达成;P4 上下文组装层后端 + P5 维护 + **阶段4 二级索引(远处拉近)+ 强制跳转指针(历史引用)**全落地。精确层五件套(指针/染色/缓存/二级索引+碎片/维护)全齐。**长文投喂破碎化**(2026-06-17)修检索盲区,见上节专页。
 **待优化**:`ArroyIndex::rebuild` 改增量 upsert/del(arroy 有 `add_item`/`del_item`),免每次开机全量重建(单用户规模当前可接受)。
 **续点**:四级=打包就绪(图标集/e5 随包/版本号,需用户拍板);精确层无欠债。
 **原文三层置换**(总纲)= 已由 P3d 惰性时间线(冷归档=在盘不在工作集)+ ContextWindow 工作集淘汰共同满足,无需另造存储层。
