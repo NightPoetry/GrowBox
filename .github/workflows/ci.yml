@@ -1,0 +1,67 @@
+name: CI
+
+# 触发:推送到 main、以及对 main 的 PR。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同分支新推送取消正在跑的旧任务,省额度。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build · clippy · test (ubuntu)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # GrowBox 的 GUI(growbox-gui)是 Tauri v2 应用;在 Linux 上编译需要 webkit2gtk-4.1
+      # 等系统库,否则该 crate 链接不过(整个工作区编译失败)。
+      - name: Install Tauri v2 system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential curl wget file
+
+      - name: Install Rust (stable + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # 缓存 target/ 与 cargo registry,后续跑大幅提速(candle/arroy/tauri 编译较重)。
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: crates/growbox-gui/frontend/package-lock.json
+
+      # ★关键顺序★:tauri.conf.json 的 frontendDist = frontend/dist,而 dist 不入库;
+      # tauri-build 在编译期要求该目录存在 → 必须先构建前端,cargo 才能编译 growbox-gui。
+      # 同时这一步本身也验证了前端(SolidJS)能 tsc 通过 + 构建成功(纯 Rust 测试覆盖不到)。
+      - name: Build frontend (creates frontend/dist required by tauri-build)
+        working-directory: crates/growbox-gui/frontend
+        run: |
+          npm ci
+          npm run build
+
+      # 全工作区 lint:当前 0 警告,用 -D warnings 钉死,新警告即红。
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # 全工作区单测。打真 API / 真 e5 模型的 live_* 与 e2e 测试均 #[ignore],CI 不跑
+      # (它们需要 DEEPSEEK_API_KEY 与 ~470MB 模型);此处跑的是用 mock 的确定性单测/集成测试。
+      - name: Test (workspace)
+        run: cargo test --workspace
