@@ -111,9 +111,11 @@ pub struct RemoteEmbedder {
 
 impl RemoteEmbedder {
     pub fn new(base: impl Into<String>, key: impl Into<String>, model: impl Into<String>) -> Self {
+        let base = base.into().trim_end_matches('/').to_string();
         RemoteEmbedder {
-            http: reqwest::Client::new(),
-            base: base.into().trim_end_matches('/').to_string(),
+            // 本地/内网嵌入服务(Ollama/LM Studio)同样绕过系统代理,避免 502(见 client.rs)。
+            http: crate::client::local_aware_client(&base),
+            base,
             key: key.into(),
             model: model.into(),
         }

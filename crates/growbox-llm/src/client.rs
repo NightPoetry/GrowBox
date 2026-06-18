@@ -14,11 +14,59 @@ pub struct LlmClient {
     api_key: String,
 }
 
+/// 解析 api_base 的 host(去协议 / 路径 / 端口 / user@),小写。
+pub(crate) fn host_of(api_base: &str) -> String {
+    let after = api_base.split("://").nth(1).unwrap_or(api_base);
+    let hostport = after.split('/').next().unwrap_or("");
+    let hostport = hostport.rsplit('@').next().unwrap_or(hostport); // 去 user:pass@
+    if let Some(v6) = hostport.strip_prefix('[') {
+        return v6.split(']').next().unwrap_or("").to_lowercase(); // IPv6 [::1]:port
+    }
+    hostport.split(':').next().unwrap_or("").to_lowercase()
+}
+
+/// host 是否本地 / 内网(loopback + RFC1918 + link-local + .local)。
+pub(crate) fn is_local_host(host: &str) -> bool {
+    if host == "localhost" || host == "0.0.0.0" || host == "::1" || host.ends_with(".local") {
+        return true;
+    }
+    if host.starts_with("127.")
+        || host.starts_with("10.")
+        || host.starts_with("192.168.")
+        || host.starts_with("169.254.")
+    {
+        return true;
+    }
+    // 172.16.0.0 – 172.31.255.255
+    if host.starts_with("172.") {
+        if let Some(o) = host.split('.').nth(1).and_then(|o| o.parse::<u8>().ok()) {
+            return (16..=31).contains(&o);
+        }
+    }
+    false
+}
+
+/// 构建 HTTP client:**本地 / 内网目标绕过系统代理**(Clash 等会把 127.0.0.1 也收走 →
+/// 连本地 LM Studio / Ollama 报 502 Bad Gateway);**公网目标保留系统代理**(国内访问
+/// 公网 API 常需代理)。真机实测见 executors/web.rs 同款处理。
+pub(crate) fn local_aware_client(api_base: &str) -> reqwest::Client {
+    if is_local_host(&host_of(api_base)) {
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    } else {
+        reqwest::Client::new()
+    }
+}
+
 impl LlmClient {
     pub fn new(api_base: impl Into<String>, api_key: impl Into<String>) -> Self {
+        let api_base = api_base.into().trim_end_matches('/').to_string();
+        let http = local_aware_client(&api_base);
         LlmClient {
-            http: reqwest::Client::new(),
-            api_base: api_base.into().trim_end_matches('/').to_string(),
+            http,
+            api_base,
             api_key: api_key.into(),
         }
     }
