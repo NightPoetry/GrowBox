@@ -316,6 +316,30 @@
       }
     }
   },
+  "set_appearance": {
+    "label": {
+      "zh-CN": "切换外观",
+      "en": "Set Appearance",
+      "ja": "外観を切り替え",
+      "zh-TW": "切換外觀"
+    },
+    "ui_desc": {
+      "zh-CN": "切换界面的明暗外观:暗色、亮色,或跟随系统。",
+      "en": "Switch the interface appearance: dark, light, or follow the system.",
+      "ja": "画面の外観を切り替えます:ダーク、ライト、またはシステムに追従。",
+      "zh-TW": "切換介面的明暗外觀:暗色、亮色,或跟隨系統。"
+    },
+    "llm_desc": {
+      "zh": "直接切换界面外观主题。与 open_settings 不同,外观是无害的展示偏好,你可以直接落地(无需用户裁决)。theme 取值:dark(暗色)/ light(亮色,暖琥珀奶油色调)/ auto(跟随系统明暗)。用户说「切到亮色/浅色」「太刺眼了换暗色」「跟随系统」之类时调用。立即生效并持久保存。",
+      "en": "Directly switch the interface appearance theme. Unlike open_settings, appearance is a harmless display preference, so you may apply it directly (no user approval needed). `theme` values: dark / light (a warm amber, cream-toned light theme) / auto (follow the system light/dark setting). Call this when the user says things like \"switch to light mode\", \"it's too bright, use dark\", or \"follow the system\". Takes effect immediately and is persisted."
+    },
+    "params": {
+      "theme": {
+        "zh": "外观:dark(暗色)/ light(亮色)/ auto(跟随系统)",
+        "en": "Appearance: dark / light / auto (follow the system)"
+      }
+    }
+  },
   "ui_control": {
     "label": {
       "zh-CN": "界面操控",

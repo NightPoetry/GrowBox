@@ -20,6 +20,7 @@ mod pty_tools;
 mod push_artifact_notice;
 mod render_artifact;
 mod selftest_artifact;
+mod set_appearance;
 mod settings;
 mod shell;
 mod shutdown;
@@ -48,6 +49,7 @@ pub use pty_tools::{PtyClose, PtyPeek, PtySend, PtyWatch};
 pub use push_artifact_notice::PushArtifactNotice;
 pub use render_artifact::RenderArtifact;
 pub use selftest_artifact::SelftestArtifact;
+pub use set_appearance::SetAppearance;
 pub use settings::OpenSettings;
 pub use shell::Shell;
 pub use shutdown::Shutdown;
@@ -93,6 +95,7 @@ pub fn builtins(
         Box::new(Lsp::new(lsp_mgr)),
         Box::new(CreateProject),
         Box::new(OpenSettings),
+        Box::new(SetAppearance),
         Box::new(UiControl::new(ui_catalog)),
         Box::new(RenderArtifact),
         Box::new(PushArtifactNotice),

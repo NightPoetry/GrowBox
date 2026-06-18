@@ -1,4 +1,4 @@
-import { onMount, createEffect, type Component } from "solid-js";
+import { onMount, onCleanup, createEffect, type Component } from "solid-js";
 
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
@@ -31,6 +31,7 @@ import {
   messages, sending, connected, statusInfo,
   projects, currentProjectId, intentEvents, flashingPaths,
   truncateToolDisplay, autoMode, selfDriveActive, setSelfDriveActive, dangerMode, setDangerMode,
+  theme,
 } from "./store";
 import { doSend, sendWebDebugEdit } from "./chat";
 import { resetAndLoadHistory, saveTranscript } from "./history";
@@ -75,6 +76,36 @@ const App: Component = () => {
   createEffect(() => {
     if (typeof document !== "undefined") {
       document.body.classList.toggle("danger-active", dangerMode());
+    }
+  });
+
+  // ★界面外观★:dark = 默认(无类);light = 挂 body.theme-light(CSS 变量级整体翻转成暖中性亮色);
+  // auto = 跟随系统 prefers-color-scheme,且注册监听,系统明暗一变即时重切(仅 auto 档生效)。
+  // 与 danger-active 同机制(变量级覆盖,零侵入逐元素改)。dark/light/auto 三档,setTheme 持久 localStorage。
+  // 切换时给 <body> 短暂挂 theme-animating → CSS 让颜色相关属性平滑渐变(首帧跳过,避免开场闪)。
+  let themeAnimReady = false;
+  let themeAnimTimer: ReturnType<typeof setTimeout> | undefined;
+  createEffect(() => {
+    if (typeof document === "undefined") return;
+    const pref = theme();
+    const mql = typeof window !== "undefined" && window.matchMedia
+      ? window.matchMedia("(prefers-color-scheme: dark)")
+      : null;
+    const apply = () => {
+      const isLight = pref === "light" || (pref === "auto" && mql !== null && !mql.matches);
+      if (themeAnimReady) {
+        document.body.classList.add("theme-animating");
+        if (themeAnimTimer) clearTimeout(themeAnimTimer);
+        themeAnimTimer = setTimeout(() => document.body.classList.remove("theme-animating"), 480);
+      }
+      document.body.classList.toggle("theme-light", isLight);
+    };
+    apply();
+    themeAnimReady = true; // 首帧之后再开启过渡
+    // 仅 auto 档需要随系统变化重算;其余两档固定,无需监听。
+    if (pref === "auto" && mql) {
+      mql.addEventListener("change", apply);
+      onCleanup(() => mql.removeEventListener("change", apply));
     }
   });
 

@@ -18,6 +18,7 @@ const STORAGE = {
   workingContextChars: "growbox_working_context_chars",
   recentRingChars: "growbox_recent_ring_chars",
   embedRemote: "growbox_embed_remote",
+  theme: "growbox_theme",
   truncateToolDisplay: "growbox_truncate_tool_display",
   expandedTools: "growbox_expanded_tools",
   autoMode: "growbox_auto_mode",
@@ -86,6 +87,12 @@ export const [workingContextChars, setWorkingContextCharsRaw] = createSignal(lsG
 export const [recentRingChars, setRecentRingCharsRaw] = createSignal(lsGet(STORAGE.recentRingChars, "0"));
 // 嵌入槽:远程开关(关=本地 e5 默认)+ 远程三项。
 export const [embedRemote, setEmbedRemoteRaw] = createSignal(lsGet(STORAGE.embedRemote, "0") === "1");
+// ★界面外观★:dark(默认,Apple 暗色)/ light(暖琥珀奶油亮色)/ auto(跟随系统明暗)。
+// 纯前端展示偏好(同 truncateToolDisplay 一类),localStorage 持久、即时生效;真相源就是这里。
+// 既可用户在设置里切,也可 LLM 经 set_appearance 执行器直接切(用户铁律:可设置项皆可被 LLM 操控)。
+export type ThemePref = "dark" | "light" | "auto";
+function normTheme(v: string): ThemePref { return v === "light" || v === "auto" ? v : "dark"; }
+export const [theme, setThemeRaw] = createSignal<ThemePref>(normTheme(lsGet(STORAGE.theme, "dark")));
 // 工具命令/路径是否截断显示。默认 "0" = 完整不截断。即时生效(不走 markDirty/重连)。
 export const [truncateToolDisplay, setTruncateToolDisplayRaw] = createSignal(lsGet(STORAGE.truncateToolDisplay, "0") === "1");
 // 自动模式(shell:false=手动逐条批准,true=LLM 审核)。立即生效,无需重连。
@@ -131,6 +138,8 @@ export function setMaxTokens(v: string) { setMaxTokensRaw(v); lsSet(STORAGE.maxT
 export function setWorkingContextChars(v: string) { setWorkingContextCharsRaw(v); lsSet(STORAGE.workingContextChars, v); markDirty(); }
 export function setRecentRingChars(v: string) { setRecentRingCharsRaw(v); lsSet(STORAGE.recentRingChars, v); markDirty(); }
 export function setEmbedRemote(v: boolean) { setEmbedRemoteRaw(v); lsSet(STORAGE.embedRemote, v ? "1" : "0"); markDirty(); }
+// 外观切换:即时生效、持久 localStorage、无需重连。body 类的实际应用见 App.tsx(含 auto 跟随系统)。
+export function setTheme(v: ThemePref) { const t = normTheme(v); setThemeRaw(t); lsSet(STORAGE.theme, t); }
 // 即时生效,不 markDirty(无需重连);持久化到 localStorage,backend 同步由调用方推送。
 export function setTruncateToolDisplay(v: boolean) { setTruncateToolDisplayRaw(v); lsSet(STORAGE.truncateToolDisplay, v ? "1" : "0"); }
 export function setAutoMode(v: boolean) { setAutoModeRaw(v); lsSet(STORAGE.autoMode, v ? "1" : "0"); }

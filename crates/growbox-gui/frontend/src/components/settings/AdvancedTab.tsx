@@ -7,6 +7,7 @@ import {
   runtimeDir, setRuntimeDir,
   workingContextChars, setWorkingContextChars,
   recentRingChars, setRecentRingChars,
+  theme, setTheme,
 } from "../../store";
 import {
   mcShellApproval, setMcShellApproval, mcUiAck, setMcUiAck,
@@ -18,6 +19,29 @@ import {
 
 const AdvancedTab: Component = () => (
               <div class="settings-tab-pane active">
+                {/* 外观:暗 / 亮(暖琥珀) / 跟随系统。即时生效、localStorage 持久;AI 也能用 set_appearance 工具切。 */}
+                <div class="settings-section">
+                  <h3>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style={{ "vertical-align": "-2px", "margin-right": "6px" }}>
+                      <circle cx="12" cy="12" r="5" />
+                      <path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" />
+                    </svg>
+                    {t("appearance") || "外观"}
+                  </h3>
+                  <p style={{ "font-size": "11px", color: "var(--text-secondary)", margin: "0 0 8px 0", "line-height": "1.5" }}>
+                    {t("appearanceHint") || "界面明暗主题。亮色为暖琥珀奶油色调。AI 也能用 set_appearance 工具直接切换。"}
+                  </p>
+                  <div class="appearance-seg">
+                    {/* 滑块:按选中项 translateX 平移过去(dark=0 / light=100% / auto=200%)。 */}
+                    <div
+                      class="appearance-seg-thumb"
+                      style={{ transform: `translateX(${theme() === "light" ? 100 : theme() === "auto" ? 200 : 0}%)` }}
+                    />
+                    <button classList={{ active: theme() === "dark" }} onClick={() => setTheme("dark")}>{t("themeDark") || "暗色"}</button>
+                    <button classList={{ active: theme() === "light" }} onClick={() => setTheme("light")}>{t("themeLight") || "亮色"}</button>
+                    <button classList={{ active: theme() === "auto" }} onClick={() => setTheme("auto")}>{t("themeAuto") || "跟随系统"}</button>
+                  </div>
+                </div>
                 {/* 上下文预算(记忆置换):工作区 + 最近 ring 字符。改完点「重连」生效。 */}
                 <div class="settings-section">
                   <h3>

@@ -14,6 +14,7 @@ import {
   setAddPathPrefill, setAddPathOpen,
   healthMonitorOpen, setHealthMonitorOpen,
   historyDrawerOpen, setHistoryDrawerOpen,
+  setTheme, type ThemePref,
 } from "./store";
 import { memoryVizOpen, openMemoryViz, closeMemoryViz, toggleMemoryViz } from "./components/MemoryViz";
 import { dreamOpen, openDreamPanel, closeDreamPanel, toggleDreamPanel } from "./components/DreamPanel";
@@ -165,6 +166,17 @@ export function dispatchUiAction(
     const applied = command.length > 0 && commandArtifact(command);
     if (id) {
       void api.uiActionAck(id, applied, { dispatched: applied }, applied ? null : "artifact_command 缺少 command 或造物未就绪");
+    }
+    return;
+  }
+
+  // 家族二:★LLM 切换界面外观★ —— 直接落地(外观无害,非用户裁决),应用 + 持久化后回执验证态。
+  if (action === "set_appearance") {
+    const raw = typeof data?.theme === "string" ? data.theme.trim().toLowerCase() : "";
+    const valid = raw === "dark" || raw === "light" || raw === "auto";
+    if (valid) setTheme(raw as ThemePref);
+    if (id) {
+      void api.uiActionAck(id, valid, { theme: raw }, valid ? null : "set_appearance 需要 theme 取 dark/light/auto");
     }
     return;
   }
