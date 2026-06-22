@@ -496,6 +496,10 @@ async fn run_agent_loop(
         let mut called_tools: Vec<String> = Vec::new();
         // ★A2 诊断推感知层★:本轮成功编辑过的 .rs 文件(非造物文件夹),循环末尾据此拉诊断 perceive。
         let mut edited_rs: Vec<PathBuf> = Vec::new();
+        // ★工具可见性闸(设计/03 推论6 + 07 推论1)★:当前作用域(工作流节点)的可用工具集 —— 本轮 wf_stack
+        // 不变,算一次贯穿整批工具。None = 不在任何节点(主智能体)= 全工具可用。脊柱侧(下方第一关)与唯一
+        // 执行闸门(dispatch_with_cancel_scoped)共用同一判据 `tool_in_scope`。
+        let node_allowed = wf_stack.last().and_then(|f| registry.node_allowed_tools(&f.wf, &f.node));
         for call in &outcome.tool_calls {
             // ★终止穿透到工具批次★:本轮可能有多个 tool_call,用户中途按「终止」→ 不再继续派发剩余工具,
             // 立刻收口(配合 shell 执行器内部的取消自杀:正在跑的那条命令也已被杀)。任务未完成,不 finalize。
@@ -511,31 +515,30 @@ async fn run_agent_loop(
                 sink.emit(AgentEvent::Status(verify_status_label(&call.name, &call.arguments))).await;
             }
 
-            // ★C1 懒加载·工作流节点派发时门控(软锁)★:懒加载开时 tools 字段不再按节点收窄(缓存恒定),
-            // 故节点的"只能用这几个工具"改在此处把关——调了节点允许名单外的工具 → 拒绝 + 引导(不执行)。
-            // 懒加载关时,旧的 tools_for 收窄已让模型选不到越界工具,此门不触发(allowlist 仅 lazy 开时算)。
-            if registry.lazy_enabled() {
-                if let Some(frame) = wf_stack.last() {
-                    if let Some(allowed) = registry.node_allowed_tools(&frame.wf, &frame.node) {
-                        if !allowed.contains(&call.name) {
-                            let mut names: Vec<&str> = allowed.iter().map(|s| s.as_str()).collect();
-                            names.sort_unstable();
-                            let msg = format!(
-                                "当前工作流「{}」这一步不允许调用「{}」。本步可用:{}。如需其它能力,请按本步引导推进,或 finish / ask_user。",
-                                frame.wf, call.name, names.join(", ")
-                            );
-                            crate::notify::perceive_notice(
-                                memory,
-                                &cfg.prompt_lang,
-                                "tool.failed",
-                                &serde_json::json!({ "tool": call.name, "detail": msg }),
-                            );
-                            sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: false, content: msg.clone() }).await;
-                            memory.ingest_with_role(format!("{} -> {}", call.name, msg), "tool");
-                            messages.push(ChatMessage::tool_result(call.id.clone(), msg));
-                            continue;
-                        }
-                    }
+            // ★工具可见性闸·脊柱侧(基础设施,设计/03 推论6 + 07 推论1)★:在工作流节点(受限作用域)内,
+            // 本步只能调用节点可用集里的工具——**与懒加载无关、无条件生效**(旧版仅 lazy 开时把关,这里放开)。
+            // 调了集外的 → 拒绝 + 引导(不执行、不进 dispatch)。这是覆盖**所有路由**(控制信号 + 真实工具)的
+            // 第一关;唯一执行闸门 dispatch 按同一判据(`tool_in_scope`)再兜一层(防代码绕过脊柱循环)。
+            // 主智能体(node_allowed=None)时不触发,全放行。
+            if let Some(allowed) = node_allowed.as_ref() {
+                if !Registry::tool_in_scope(&call.name, Some(allowed)) {
+                    let mut names: Vec<&str> = allowed.iter().map(|s| s.as_str()).collect();
+                    names.sort_unstable();
+                    let wf_name = wf_stack.last().map(|f| f.wf.as_str()).unwrap_or("");
+                    let msg = format!(
+                        "当前工作流「{}」这一步不允许调用「{}」。本步可用:{}。如需其它能力,请按本步引导推进,或 finish / ask_user。",
+                        wf_name, call.name, names.join(", ")
+                    );
+                    crate::notify::perceive_notice(
+                        memory,
+                        &cfg.prompt_lang,
+                        "tool.failed",
+                        &serde_json::json!({ "tool": call.name, "detail": msg }),
+                    );
+                    sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: false, content: msg.clone() }).await;
+                    memory.ingest_with_role(format!("{} -> {}", call.name, msg), "tool");
+                    messages.push(ChatMessage::tool_result(call.id.clone(), msg));
+                    continue;
                 }
             }
 
@@ -861,8 +864,10 @@ async fn run_agent_loop(
             }
 
             // 穿取消句柄:让 shell 等长命令在执行中途响应「终止」(不只 LLM 流式循环可取消)。
+            // ★工具可见性闸·闸门侧★:带本作用域可用集(node_allowed)→ 唯一执行闸门按 tool_in_scope 再校验一层
+            // (与脊柱侧同判据,防绕过;主智能体 node_allowed=None 时等价旧 dispatch_with_cancel,全放行)。
             let mut dispatch = registry
-                .dispatch_with_cancel(call, sandbox, work_dir, sink.cancel_flag())
+                .dispatch_with_cancel_scoped(call, sandbox, work_dir, sink.cancel_flag(), node_allowed.as_ref())
                 .await;
 
             // ★授权门(决定脊柱)★:NeedAuth(越界路径 / shell 引用敏感路径 / 不可逆确认)→ 经唯一

@@ -461,6 +461,15 @@ impl Registry {
         )
     }
 
+    /// ★工具可见性闸(基础设施,见 设计/03 推论6 + 07 推论1)★:`name` 是否落在当前作用域的可用工具集内。
+    /// `allowed = None`(无作用域 = 主智能体)→ 恒 true(全工具可用);
+    /// `allowed = Some(集)`(工作流节点等受限作用域)→ name ∈ 集。
+    /// 这是"只能用工具列表内的工具(防幻觉/防越权)"的**单一判据**——脊柱循环(派发前)与唯一执行闸门
+    /// (`dispatch_inner`)共用,故每个带工具列表的作用域都按同一条规则收口。与懒加载等模式开关无关。
+    pub fn tool_in_scope(name: &str, allowed: Option<&HashSet<String>>) -> bool {
+        allowed.map(|a| a.contains(name)).unwrap_or(true)
+    }
+
     /// 唯一分发路径:统计 + 转 `dispatch_inner`(真分发逻辑)。
     /// 分发(便捷版,不可中途取消)。测试/无前端路径用;生产脊柱用 `dispatch_with_cancel` 穿终止句柄。
     pub async fn dispatch(&self, call: &ToolCall, sandbox: &Sandbox, work_dir: &Path) -> Dispatch {
@@ -476,7 +485,21 @@ impl Registry {
         work_dir: &Path,
         cancel: growbox_core::CancelFlag,
     ) -> Dispatch {
-        self.dispatch_counted(call, sandbox, work_dir, cancel, false).await
+        self.dispatch_counted(call, sandbox, work_dir, cancel, None, false).await
+    }
+
+    /// 分发(带取消句柄 + 作用域可用工具集)。脊柱在**工作流节点内**用它派发真实工具:
+    /// `allowed = Some(节点可用集)` → 唯一执行闸门按 `tool_in_scope` 校验(列表外即拒,防幻觉/越权,
+    /// 见 设计/03 推论6 + 07 推论1);`allowed = None` 等价 `dispatch_with_cancel`(主智能体,全工具放行)。
+    pub async fn dispatch_with_cancel_scoped(
+        &self,
+        call: &ToolCall,
+        sandbox: &Sandbox,
+        work_dir: &Path,
+        cancel: growbox_core::CancelFlag,
+        allowed: Option<&HashSet<String>>,
+    ) -> Dispatch {
+        self.dispatch_counted(call, sandbox, work_dir, cancel, allowed, false).await
     }
 
     /// 已授权重派发:用户经决定脊柱(`request_decision`)放行某 NeedAuth 动作后,带 `authorized=true`
@@ -489,19 +512,22 @@ impl Registry {
         work_dir: &Path,
         cancel: growbox_core::CancelFlag,
     ) -> Dispatch {
-        self.dispatch_counted(call, sandbox, work_dir, cancel, true).await
+        // 授权重派发:首次 scoped 派发已过工具可见性闸(否则首次即 Denied,到不了 NeedAuth)→ 此处传 None 免重校验。
+        self.dispatch_counted(call, sandbox, work_dir, cancel, None, true).await
     }
 
-    /// 统计包装:inner + 调用/失败计数。`authorized` 透传给 inner(授权重派发跳过 NeedAuth 门)。
+    /// 统计包装:inner + 调用/失败计数。`allowed`(作用域可用集,见 `tool_in_scope`)与 `authorized`
+    /// (授权重派发跳过 NeedAuth 门)一并透传给 inner。
     async fn dispatch_counted(
         &self,
         call: &ToolCall,
         sandbox: &Sandbox,
         work_dir: &Path,
         cancel: growbox_core::CancelFlag,
+        allowed: Option<&HashSet<String>>,
         authorized: bool,
     ) -> Dispatch {
-        let d = self.dispatch_inner(call, sandbox, work_dir, cancel, authorized).await;
+        let d = self.dispatch_inner(call, sandbox, work_dir, cancel, allowed, authorized).await;
         match &d {
             Dispatch::Done(r) | Dispatch::Terminal(r) | Dispatch::AwaitingUser(r) => {
                 self.tool_calls.fetch_add(1, Ordering::Relaxed);
@@ -526,8 +552,21 @@ impl Registry {
         sandbox: &Sandbox,
         work_dir: &Path,
         cancel: growbox_core::CancelFlag,
+        allowed: Option<&HashSet<String>>,
         authorized: bool,
     ) -> Dispatch {
+        // ★工具可见性闸(基础设施,见 设计/03 推论6 + 07 推论1)★:受限作用域(allowed=Some,如工作流节点)
+        // 内只能调用其可用集里的工具——列表外的(哪怕已注册/本身安全/模型幻觉出来)在此唯一执行闸门即拒,
+        // 与脊柱循环派发前的同一判据(`tool_in_scope`)互为表里;无作用域(None,主智能体)恒放行。
+        // 硬拒(授权也不放行):这是"该作用域无此能力",非路径/风险类可授权事项。
+        if !Self::tool_in_scope(&call.name, allowed) {
+            return Dispatch::Denied {
+                reason: format!(
+                    "工具「{}」不在当前步骤的可用工具集内(防幻觉/越权:本步只能调用已暴露给你的工具)。",
+                    call.name
+                ),
+            };
+        }
         // ★D1 MCP★:内置 execs 没有的工具,若 hub 认领 → 造动态执行器,**走同一条** dispatch 路径
         // (架构公理:一切能力皆执行器)。`mcp_holder` 持有所有权,`exec` 借它;非 MCP 则为 None。
         let mcp_holder: Option<Box<dyn Executor>> = if self.execs.contains_key(&call.name) {
@@ -850,5 +889,49 @@ mod tests {
             reg.dispatch(&call("demo_echo", serde_json::json!({"text": "x"})), &sb, dir.path()).await,
             Dispatch::Done(r) if r.ok
         ));
+    }
+
+    /// ★工具可见性闸(设计/03 推论6 + 07 推论1)★:受限作用域(allowed=Some)内,列表外的工具在唯一执行
+    /// 闸门即拒(哪怕目标本在可写区 = 不是安全门拦,是可见性闸拦);列表内的正常执行;allowed=None(主智能体)
+    /// 恒放行。这把"节点工具子集"从"不展示在菜单"升级成"调了也执行不了"——防幻觉/防绕过。
+    #[tokio::test]
+    async fn dispatch_scoped_rejects_out_of_scope_tool() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "hi").unwrap();
+        let reg = Registry::with_builtins(TaskManager::new());
+        let sb = Sandbox::new(vec![dir.path().to_path_buf()], vec![]);
+        // 作用域只允许 file_read(模拟"只读巡检"节点)。
+        let allowed: HashSet<String> = ["file_read".to_string()].into_iter().collect();
+
+        // 列表内:file_read 正常执行。
+        let c_read = call("file_read", serde_json::json!({"path": "a.txt"}));
+        match reg.dispatch_with_cancel_scoped(&c_read, &sb, dir.path(), None, Some(&allowed)).await {
+            Dispatch::Done(r) => assert!(r.ok && r.content == "hi"),
+            _ => panic!("列表内的 file_read 应正常执行"),
+        }
+
+        // 列表外:file_write 在唯一执行闸门被拒(目标本在可写区 → 排除安全门拦的混淆)。
+        let c_write = call("file_write", serde_json::json!({"path": "a.txt", "content": "x"}));
+        match reg.dispatch_with_cancel_scoped(&c_write, &sb, dir.path(), None, Some(&allowed)).await {
+            Dispatch::Denied { reason } => assert!(reason.contains("可用工具集"), "拒因应点明可见性闸: {reason}"),
+            _ => panic!("列表外的 file_write 应被可见性闸硬拒"),
+        }
+        // 真没执行:a.txt 仍是 hi。
+        assert_eq!(std::fs::read_to_string(dir.path().join("a.txt")).unwrap(), "hi");
+
+        // 无作用域(allowed=None = 主智能体):file_write 恢复放行(可见性闸不收窄)。
+        match reg.dispatch_with_cancel_scoped(&c_write, &sb, dir.path(), None, None).await {
+            Dispatch::Done(r) => assert!(r.ok, "主智能体无作用域,file_write 应放行"),
+            _ => panic!("allowed=None 应放行全部工具"),
+        }
+    }
+
+    /// `tool_in_scope` 单一判据:None 恒真(主智能体全工具);Some 仅列表内为真。
+    #[test]
+    fn tool_in_scope_judge() {
+        let allowed: HashSet<String> = ["file_read".to_string(), "grep".to_string()].into_iter().collect();
+        assert!(Registry::tool_in_scope("shell", None), "无作用域恒放行");
+        assert!(Registry::tool_in_scope("file_read", Some(&allowed)));
+        assert!(!Registry::tool_in_scope("shell", Some(&allowed)), "列表外应挡");
     }
 }
