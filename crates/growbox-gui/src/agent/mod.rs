@@ -137,6 +137,15 @@ struct WfFrame {
     loops_used: i64,
 }
 
+impl WfFrame {
+    /// 退出/出栈时是否丢弃本帧的分支工作消息(截断回 `msg_base`、只回摘要)。
+    /// = isolated(隐藏父 + 丢)或 fork(看父 + 丢);inherit 不丢(分支工作留在父)。
+    /// 收成单一判据:五处出栈点共用,加新上下文模式只改这里(免再散落五份 `isolated || fork`)。
+    fn discards_on_exit(&self) -> bool {
+        self.isolated || self.fork
+    }
+}
+
 /// 本轮进入(嵌套)工作流时,从入口工具调用参数解析出的"函数调用签名"(见 07 原则3)。
 struct EnteredWf {
     wf: String,
@@ -1042,7 +1051,7 @@ async fn run_agent_loop(
                 && wf_stack.last().map(|f| f.max_loops >= 0 && f.loops_used + 1 > f.max_loops).unwrap_or(false);
             if loop_blocked {
                 let popped = wf_stack.pop().expect("loop_blocked 蕴含栈非空");
-                if popped.isolated || popped.fork {
+                if popped.discards_on_exit() {
                     messages.truncate(popped.msg_base);
                 }
                 context_floor = popped.prev_floor;
@@ -1079,7 +1088,7 @@ async fn run_agent_loop(
                 let mut next_max = ent.max_loops;
                 if ent.direct {
                     if let Some(popped) = wf_stack.pop() {
-                        if popped.isolated || popped.fork {
+                        if popped.discards_on_exit() {
                             messages.truncate(popped.msg_base);
                         }
                         context_floor = popped.prev_floor;
@@ -1116,7 +1125,7 @@ async fn run_agent_loop(
                 if let Some(frame) = wf_stack.pop() {
                     // 默认(full=false):isolated 截断分支工作消息(最少充分信息,退出即丢)。
                     // full=true:不截断,分支原始工作上下文直通回父(零 LLM 搬运;慎用,污染主上下文)。
-                    if (frame.isolated || frame.fork) && !full {
+                    if frame.discards_on_exit() && !full {
                         messages.truncate(frame.msg_base);
                     }
                     context_floor = frame.prev_floor;
@@ -1142,8 +1151,8 @@ async fn run_agent_loop(
                 };
                 if target == END_NODE {
                     let popped = wf_stack.pop().expect("last 已确认存在");
-                    if popped.isolated || popped.fork {
-                        messages.truncate(popped.msg_base); // END 无显式返回值:isolated/fork 退出即丢分支噪音。
+                    if popped.discards_on_exit() {
+                        messages.truncate(popped.msg_base); // END 无显式返回值:分支退出即丢工作消息(isolated/fork)。
                     }
                     context_floor = popped.prev_floor;
                     sink.emit(AgentEvent::Notice(format!("工作流「{}」已完成", popped.wf))).await;
@@ -1158,7 +1167,7 @@ async fn run_agent_loop(
                     break;
                 } else {
                     let popped = wf_stack.pop().expect("last 已确认存在");
-                    if popped.isolated || popped.fork {
+                    if popped.discards_on_exit() {
                         messages.truncate(popped.msg_base);
                     }
                     context_floor = popped.prev_floor;
