@@ -118,6 +118,10 @@ struct WfFrame {
     /// 上下文隔离:true = 本帧只看 [系统提示 + 节点引导 + 调用方 input + 本帧工作消息],
     /// 父对话被隐藏(裁剪上下文);退出即丢弃本帧工作消息(最少充分信息原则)。false = 继承父全量。
     isolated: bool,
+    /// fork 模式(context_mode=fork):看得到父全量上下文(同 inherit,不抬 context_floor),但退出时
+    /// **截断分支工作**(同 isolated,只回摘要)。= 解耦"隐藏父"与"退出截断"两开关后的第三组合(继承全境 +
+    /// 只回摘要),给"需父全部背景的繁重机械活"。与 `isolated` 互斥。见 设计/07-附录-子Agent三旋钮。
+    fork: bool,
     /// 进入本帧时 `messages` 的长度:isolated 切片的"地板" + 退出截断的锚点(丢弃本帧之后追加的消息)。
     msg_base: usize,
     /// 进入前的 `context_floor`,退出时恢复(支持嵌套隔离)。
@@ -141,8 +145,10 @@ struct EnteredWf {
     input: Option<String>,
     /// 调用方预留的返回契约:要带回什么、什么格式(workflow_return 据此产出)。
     return_spec: Option<String>,
-    /// 上下文模式:true=isolated(裁剪,只看 input)/ false=inherit(继承父全量)。
+    /// 上下文模式 isolated:true=隐藏父、只看 input(裁剪)/ false=继承父全量。
     isolated: bool,
+    /// 上下文模式 fork:看得到父全量、但退出截断分支工作(只回摘要)。与 isolated 互斥(同一 context_mode 字符串)。
+    fork: bool,
     /// 调用方式:false=栈调用(默认,压栈,被调返回到调用方);true=直接调用(尾调用,替换当前帧,
     /// 不压栈、栈深恒定、不返回到调用方——用于"顺流而下/循环"如主循环式工作流,避免栈溢出,见 07 v2 原则6)。
     direct: bool,
@@ -277,6 +283,7 @@ async fn run_agent_loop(
                 wf: wf_name,
                 node: node_id,
                 isolated: false,
+                fork: false,
                 msg_base,
                 prev_floor: context_floor,
                 is_branch: false,
@@ -568,7 +575,9 @@ async fn run_agent_loop(
                 let entry = wf.entry.clone();
                 let sig: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
                 let pick = |k: &str| sig.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(String::from);
-                let isolated = sig.get("context_mode").and_then(|v| v.as_str()).map(|m| m.eq_ignore_ascii_case("isolated")).unwrap_or(false);
+                let cmode = sig.get("context_mode").and_then(|v| v.as_str()).unwrap_or("");
+                let isolated = cmode.eq_ignore_ascii_case("isolated");
+                let fork = cmode.eq_ignore_ascii_case("fork"); // fork=看得到父(同 inherit)但退出截断(同 isolated);与 isolated 互斥
                 let direct = sig.get("direct").and_then(|v| v.as_bool()).unwrap_or(false);
                 let max_loops = sig.get("max_loops").and_then(|v| v.as_i64()).unwrap_or(-1);
                 let ack = if wf.node(&entry).is_some() {
@@ -583,6 +592,7 @@ async fn run_agent_loop(
                     input: pick("input"),
                     return_spec: pick("return_spec"),
                     isolated,
+                    fork,
                     direct,
                     max_loops,
                 });
@@ -1032,7 +1042,7 @@ async fn run_agent_loop(
                 && wf_stack.last().map(|f| f.max_loops >= 0 && f.loops_used + 1 > f.max_loops).unwrap_or(false);
             if loop_blocked {
                 let popped = wf_stack.pop().expect("loop_blocked 蕴含栈非空");
-                if popped.isolated {
+                if popped.isolated || popped.fork {
                     messages.truncate(popped.msg_base);
                 }
                 context_floor = popped.prev_floor;
@@ -1069,7 +1079,7 @@ async fn run_agent_loop(
                 let mut next_max = ent.max_loops;
                 if ent.direct {
                     if let Some(popped) = wf_stack.pop() {
-                        if popped.isolated {
+                        if popped.isolated || popped.fork {
                             messages.truncate(popped.msg_base);
                         }
                         context_floor = popped.prev_floor;
@@ -1089,6 +1099,7 @@ async fn run_agent_loop(
                     wf: ent.wf,
                     node: ent.entry,
                     isolated: ent.isolated,
+                    fork: ent.fork,
                     msg_base,
                     prev_floor,
                     is_branch,
@@ -1105,7 +1116,7 @@ async fn run_agent_loop(
                 if let Some(frame) = wf_stack.pop() {
                     // 默认(full=false):isolated 截断分支工作消息(最少充分信息,退出即丢)。
                     // full=true:不截断,分支原始工作上下文直通回父(零 LLM 搬运;慎用,污染主上下文)。
-                    if frame.isolated && !full {
+                    if (frame.isolated || frame.fork) && !full {
                         messages.truncate(frame.msg_base);
                     }
                     context_floor = frame.prev_floor;
@@ -1131,8 +1142,8 @@ async fn run_agent_loop(
                 };
                 if target == END_NODE {
                     let popped = wf_stack.pop().expect("last 已确认存在");
-                    if popped.isolated {
-                        messages.truncate(popped.msg_base); // END 无显式返回值:isolated 退出即丢分支噪音。
+                    if popped.isolated || popped.fork {
+                        messages.truncate(popped.msg_base); // END 无显式返回值:isolated/fork 退出即丢分支噪音。
                     }
                     context_floor = popped.prev_floor;
                     sink.emit(AgentEvent::Notice(format!("工作流「{}」已完成", popped.wf))).await;
@@ -1147,7 +1158,7 @@ async fn run_agent_loop(
                     break;
                 } else {
                     let popped = wf_stack.pop().expect("last 已确认存在");
-                    if popped.isolated {
+                    if popped.isolated || popped.fork {
                         messages.truncate(popped.msg_base);
                     }
                     context_floor = popped.prev_floor;

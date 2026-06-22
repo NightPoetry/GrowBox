@@ -1461,6 +1461,37 @@ async fn workflow_isolated_hides_parent_and_discards_on_return() {
     assert!(!parent_view.contains("CHILDTOKEN"), "isolated 退出即丢弃分支噪音(开场 input 被截断)");
 }
 
+/// ★fork 模式(子 Agent 三旋钮):继承父全量上下文(看得到父=与 isolated 的关键区别)+ 退出截断丢弃分支噪音(只回摘要)★。
+#[tokio::test]
+async fn workflow_fork_inherits_parent_but_discards_on_return() {
+    let dir = tempdir().unwrap();
+    let reg = Registry::with_builtins(TaskManager::new());
+    let sb = Sandbox::new(vec![dir.path().to_path_buf()], vec![]);
+    let child = r#"{"name":"fork_wf","description":"fork子","entry":"c1","nodes":[{"id":"c1","prompt":"干活后结束","tools":["file_write"],"next":[{"to":"END","on_tool":"file_write"}]}]}"#;
+    define_two(&reg, &sb, dir.path(), &[child]).await;
+
+    let llm = Scripted::new(vec![
+        tool_call_chunks("a", "fork_wf", r#"{"context_mode":"fork","input":"CHILDTOKEN 处理这个"}"#), // T0
+        tool_call_chunks("b", "file_write", r#"{"path":"w.txt","content":"x"}"#),                       // T1: 子干活→END
+        answer_then_finish("好了"),                                                                     // T2: 主 finish
+    ]);
+    let mut mem = Memory::new();
+    let fw = Flywheel::new();
+    let sink = Collector::default();
+    let reasoner = NullReasoner;
+
+    let out = agent_loop("处理任务 PARENTTOKEN", &cfg(), &llm, &reg, &sb, &mut mem, &LocalSub, &reasoner, &fw, dir.path(), &sink).await;
+    assert_eq!(out.stopped, StopReason::Completed);
+    // T1(子第一轮,fork):既看得到自己的 input,也看得到父对话(继承全量 = 与 isolated 的关键区别)。
+    let child_view = llm.messages_text_at(1);
+    assert!(child_view.contains("CHILDTOKEN"), "fork 子应看到自己的 input");
+    assert!(child_view.contains("PARENTTOKEN"), "fork 子应继承父全量上下文(看得到父,这是与 isolated 的关键区别)");
+    // T2(子返回后,父视角):父上下文仍在;子的工作消息(开场 input 等)被截断丢弃(只回摘要,不污染父)。
+    let parent_view = llm.messages_text_at(2);
+    assert!(parent_view.contains("PARENTTOKEN"), "返回后父上下文仍在");
+    assert!(!parent_view.contains("CHILDTOKEN"), "fork 退出截断分支噪音(开场 input 被丢弃,只回摘要)");
+}
+
 /// ★v2 原则4:full=true 全量返回,不截断,分支原始工作上下文直通回父(零 LLM 搬运)★。
 #[tokio::test]
 async fn workflow_return_full_passthrough_does_not_truncate() {

@@ -207,8 +207,8 @@ fn wf_tool_def(wf: &Workflow) -> ToolDef {
                 },
                 "context_mode": {
                     "type": "string",
-                    "enum": ["inherit", "isolated"],
-                    "description": "上下文模式:inherit=继承你当前全量上下文(默认);isolated=只看你给的 input + 系统提示,你的对话被隐藏(裁剪、隔离噪音、退出即丢)。复杂/嘈杂的子任务用 isolated。"
+                    "enum": ["inherit", "isolated", "fork"],
+                    "description": "上下文模式(子任务三选一,按它需不需要你的全部背景、要不要把过程留下来选):inherit=继承你当前全量上下文、分支工作留在你这里(默认,轻量续做);isolated=只看你给的 input + 系统提示、你的对话被隐藏、退出只回摘要(自洽的调查/审核子任务,裁噪音、可并行);fork=继承你当前全量上下文、但分支工作不回灌、退出只回摘要(需要你全部背景的繁重机械活,如大范围重构/反复编译,它什么都知道、只把结论交回、过程噪音不污染你)。"
                 },
                 "direct": {
                     "type": "boolean",

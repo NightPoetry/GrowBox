@@ -65,6 +65,7 @@ pub const SEEDS: &[SeedSkill] = &[
     SeedSkill { name: "reply-formatting", category: "ui", trigger: "给用户写回复、且输出里包含链接、表格、列表、代码等需要正确渲染的格式时", body: include_str!("seeds/reply-formatting.md") },
     SeedSkill { name: "web-debug-source-locate", category: "web", trigger: "网页调试窗框选元素后,需要把选中的 DOM 反向定位到本地源码再修改时", body: include_str!("seeds/web-debug-source-locate.md") },
     SeedSkill { name: "web-qa-self-feedback", category: "web", trigger: "要测自己做的网页功能对不对(按钮跳转/表单提交/各种交互),像真人测试员有计划地真操作再核对时", body: include_str!("seeds/web-qa-self-feedback.md") },
+    SeedSkill { name: "delegate-subagent", category: "workflow", trigger: "要把一块活外派给子 Agent(工作流分支调用)去做,决定给它多少上下文、多少工具、要它回什么时", body: include_str!("seeds/delegate-subagent.md") },
 ];
 
 /// 按名取内置种子的正文(精确、大小写不敏感)。
