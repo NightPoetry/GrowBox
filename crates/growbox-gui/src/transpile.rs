@@ -17,7 +17,8 @@
 //!   (registry/render/bridge)里直接 `tr()`,不必把状态层层穿参 —— 这是本特性唯一的进程级共享态。
 
 use std::collections::HashMap;
-use std::sync::{OnceLock, RwLock};
+use std::sync::OnceLock;
+use parking_lot::RwLock;
 
 use crate::tool_i18n::normalize_prompt_lang;
 
@@ -218,7 +219,7 @@ pub fn okey(model: &str, lang: &str, key: &str) -> String {
 /// 连接时把当前开关 + 两个模型 id + 覆盖表整体推入(替换旧态)。
 /// `sub_model`:今天传 == `main_model`(潜意识复用主模型);将来拆独立潜意识模型时传它自己的 id。
 pub fn configure(enabled: bool, main_model: &str, sub_model: &str, overrides: HashMap<String, String>) {
-    let mut st = state().write().unwrap();
+    let mut st = state().write();
     st.enabled = enabled;
     st.main_model = main_model.to_string();
     st.sub_model = sub_model.to_string();
@@ -227,22 +228,22 @@ pub fn configure(enabled: bool, main_model: &str, sub_model: &str, overrides: Ha
 
 /// 仅翻开关(前端勾选即时生效,不必重连);模型与覆盖表保持不变。
 pub fn set_enabled(enabled: bool) {
-    state().write().unwrap().enabled = enabled;
+    state().write().enabled = enabled;
 }
 
 /// 仅替换覆盖表(「重写提示词」动作跑完后刷新内存版);开关与模型 id 不变。
 pub fn set_overrides(overrides: HashMap<String, String>) {
-    state().write().unwrap().overrides = overrides;
+    state().write().overrides = overrides;
 }
 
 /// 取当前覆盖表快照(动作起手时合并进去 —— 按模型分桶,不同模型/语言的旧覆盖保留)。
 pub fn overrides_snapshot() -> HashMap<String, String> {
-    state().read().unwrap().overrides.clone()
+    state().read().overrides.clone()
 }
 
 /// 角色解析到模型 id(覆盖分桶 + 用哪个模型转译都看它)。
 pub fn model_for_role(role: PromptRole) -> String {
-    let st = state().read().unwrap();
+    let st = state().read();
     match role {
         PromptRole::Main => st.main_model.clone(),
         PromptRole::Subconscious => st.sub_model.clone(),
@@ -251,19 +252,19 @@ pub fn model_for_role(role: PromptRole) -> String {
 
 /// 当前是否启用(前端回显 / 取用方快速短路)。
 pub fn is_enabled() -> bool {
-    state().read().unwrap().enabled
+    state().read().enabled
 }
 
 /// 当前覆盖条数(前端回显:转译产物规模)。
 pub fn override_count() -> usize {
-    state().read().unwrap().overrides.len()
+    state().read().overrides.len()
 }
 
 /// ★唯一取用 chokepoint★:把一条提示词在交给 LLM 前过这一道。
 /// 关 / 模型空 / 该桶无覆盖 → 逐字返回 `original`(零行为变更);否则返回该模型该语言的转译版。
 pub fn tr(key: &str, role: PromptRole, prompt_lang: &str, original: &str) -> String {
     let lang = normalize_prompt_lang(prompt_lang);
-    let st = state().read().unwrap();
+    let st = state().read();
     if !st.enabled {
         return original.to_string();
     }

@@ -17,7 +17,7 @@
 //! 每次 LLM 调用各 acquire 一次,故能在调用间隙让位给新来的高优先级。
 
 use std::sync::Arc;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use tokio::sync::Notify;
 
@@ -76,7 +76,7 @@ impl Arbiter {
     /// 排队取槽的核心:拿到(busy=true)即返回,守卫类型由调用方包。
     async fn acquire_slot(&self, p: Priority) {
         let idx = p as usize;
-        self.inner.lock().unwrap().waiting[idx] += 1;
+        self.inner.lock().waiting[idx] += 1;
         // RAII:无论正常拿到还是中途被取消,都注销本等待者计数(避免饿死更低优先级)。
         let dec = WaiterDec { arbiter: self, idx };
 
@@ -86,7 +86,7 @@ impl Arbiter {
             // 先登记唤醒意图,再检查条件,避免检查与等待之间丢唤醒。
             fut.as_mut().enable();
             {
-                let mut g = self.inner.lock().unwrap();
+                let mut g = self.inner.lock();
                 // 有严格更高优先级在排队 → 让它先走(本档不抢)。
                 let higher_waiting = g.waiting[..idx].iter().any(|&n| n > 0);
                 if !g.busy && !higher_waiting {
@@ -102,17 +102,17 @@ impl Arbiter {
     }
 
     fn release(&self) {
-        self.inner.lock().unwrap().busy = false;
+        self.inner.lock().busy = false;
         self.notify.notify_waiters(); // 唤醒所有等待者重判,最高可走的优先级胜出
     }
 
     #[cfg(test)]
     fn waiters(&self, p: Priority) -> usize {
-        self.inner.lock().unwrap().waiting[p as usize]
+        self.inner.lock().waiting[p as usize]
     }
     #[cfg(test)]
     fn is_busy(&self) -> bool {
-        self.inner.lock().unwrap().busy
+        self.inner.lock().busy
     }
 }
 
@@ -123,7 +123,7 @@ struct WaiterDec<'a> {
 }
 impl Drop for WaiterDec<'_> {
     fn drop(&mut self) {
-        let mut g = self.arbiter.inner.lock().unwrap();
+        let mut g = self.arbiter.inner.lock();
         g.waiting[self.idx] = g.waiting[self.idx].saturating_sub(1);
     }
 }
@@ -201,7 +201,7 @@ mod tests {
         let (a1, o1) = (arb.clone(), order.clone());
         let fly = tokio::spawn(async move {
             let _g = a1.acquire(Priority::Flywheel).await;
-            o1.lock().unwrap().push("flywheel");
+            o1.lock().push("flywheel");
             // 持槽片刻,确保顺序可观测。
             tokio::task::yield_now().await;
         });
@@ -212,7 +212,7 @@ mod tests {
         let (a2, o2) = (arb.clone(), order.clone());
         let agent = tokio::spawn(async move {
             let _g = a2.acquire(Priority::Agent).await;
-            o2.lock().unwrap().push("agent");
+            o2.lock().push("agent");
             tokio::task::yield_now().await;
         });
         while arb.waiters(Priority::Agent) == 0 {
@@ -223,6 +223,6 @@ mod tests {
         drop(hold);
         fly.await.unwrap();
         agent.await.unwrap();
-        assert_eq!(order.lock().unwrap().as_slice(), &["agent", "flywheel"], "Agent 优先于 Flywheel");
+        assert_eq!(order.lock().as_slice(), &["agent", "flywheel"], "Agent 优先于 Flywheel");
     }
 }

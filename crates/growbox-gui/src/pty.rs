@@ -13,7 +13,8 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
+use parking_lot::Mutex;
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
@@ -100,7 +101,7 @@ pub fn open(command: &str, work_dir: &std::path::Path, cols: u16, rows: u16, on_
         });
     }
 
-    registry().lock().unwrap().insert(
+    registry().lock().insert(
         id.clone(),
         PtySession {
             writer,
@@ -117,7 +118,7 @@ pub fn open(command: &str, work_dir: &std::path::Path, cols: u16, rows: u16, on_
 
 /// 设置会话的自适应轮询间隔(秒;0=停)。AI 经 pty_watch 调。返回是否找到会话。
 pub fn set_watch(id: &str, secs: u64) -> bool {
-    let reg = registry().lock().unwrap();
+    let reg = registry().lock();
     match reg.get(id) {
         Some(s) => {
             s.watch_secs.store(secs, Ordering::Relaxed);
@@ -129,12 +130,12 @@ pub fn set_watch(id: &str, secs: u64) -> bool {
 
 /// 读会话当前轮询间隔(秒;0=不轮询)。前端每次唤醒后据此排下一拍;会话不存在=0。
 pub fn watch_interval(id: &str) -> u64 {
-    registry().lock().unwrap().get(id).map(|s| s.watch_secs.load(Ordering::Relaxed)).unwrap_or(0)
+    registry().lock().get(id).map(|s| s.watch_secs.load(Ordering::Relaxed)).unwrap_or(0)
 }
 
 /// 往会话写入(用户键入 / AI 接管),data 原样送进 PTY stdin。返回是否找到会话。
 pub fn send(id: &str, data: &str) -> bool {
-    let mut reg = registry().lock().unwrap();
+    let mut reg = registry().lock();
     let Some(s) = reg.get_mut(id) else { return false };
     let _ = s.writer.write_all(data.as_bytes());
     let _ = s.writer.flush();
@@ -143,15 +144,15 @@ pub fn send(id: &str, data: &str) -> bool {
 
 /// 取会话近期输出尾部(最多 max 字节),供 AI 主动 peek 或唤醒 seed 取最近。
 pub fn peek(id: &str, max: usize) -> Option<String> {
-    let reg = registry().lock().unwrap();
+    let reg = registry().lock();
     let s = reg.get(id)?;
-    let buf = s.buffer.lock().unwrap();
+    let buf = s.buffer.lock();
     Some(tail(&buf, max))
 }
 
 /// 关闭会话:kill 子进程 + 从注册表移除(连同 master drop = 关 PTY)。返回是否找到。
 pub fn close(id: &str) -> bool {
-    let mut reg = registry().lock().unwrap();
+    let mut reg = registry().lock();
     match reg.remove(id) {
         Some(mut s) => {
             let _ = s.child.kill();
@@ -163,17 +164,17 @@ pub fn close(id: &str) -> bool {
 
 /// 会话是否存在且进程未退出。
 pub fn is_alive(id: &str) -> bool {
-    let reg = registry().lock().unwrap();
+    let reg = registry().lock();
     reg.get(id).map(|s| !s.exited.load(Ordering::Relaxed)).unwrap_or(false)
 }
 
 /// 会话命令原文(展示用)。
 pub fn command_of(id: &str) -> Option<String> {
-    registry().lock().unwrap().get(id).map(|s| s.command.clone())
+    registry().lock().get(id).map(|s| s.command.clone())
 }
 
 fn append_capped(buffer: &Arc<Mutex<String>>, chunk: &str) {
-    let mut b = buffer.lock().unwrap();
+    let mut b = buffer.lock();
     b.push_str(chunk);
     if b.len() > BUFFER_CAP {
         let cut = b.len() - BUFFER_CAP;
@@ -206,14 +207,14 @@ mod tests {
     fn open_echo_streams_output_and_peek() {
         let collected = Arc::new(Mutex::new(String::new()));
         let c2 = collected.clone();
-        let sink: OutputSink = Arc::new(move |_id, chunk| c2.lock().unwrap().push_str(chunk));
+        let sink: OutputSink = Arc::new(move |_id, chunk| c2.lock().push_str(chunk));
         let dir = std::env::temp_dir();
         let id = open("echo hello-pty", &dir, 80, 24, sink).unwrap();
         // 给 reader 线程时间收输出 + 进程退出。
         std::thread::sleep(Duration::from_millis(400));
         let peeked = peek(&id, 4096).unwrap_or_default();
         assert!(peeked.contains("hello-pty"), "peek 应含输出,实得: {peeked:?}");
-        assert!(collected.lock().unwrap().contains("hello-pty"), "回调应收到输出");
+        assert!(collected.lock().contains("hello-pty"), "回调应收到输出");
         close(&id);
     }
 
