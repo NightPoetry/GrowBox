@@ -28,22 +28,16 @@ pub async fn set_pointer_config(
     force_judge: bool,
 ) -> Result<(), String> {
     let mut st = state.lock().await;
-    st.settings.pointer_match_mode = match_mode.clone();
+    st.settings.pointer_match_mode = match_mode;
     st.settings.pointer_follow_threshold = follow_threshold;
     st.settings.pointer_neg_block_threshold = neg_block_threshold;
     st.settings.pointer_k_merge_threshold = k_merge_threshold;
     st.settings.pointer_weight_gain = weight_gain;
     st.settings.pointer_k_cap = k_cap;
     st.settings.pointer_force_judge = force_judge;
-    st.memory.set_pointer_config(growbox_memory::PointerConfig {
-        match_mode: growbox_memory::PointerMatchMode::from_setting(&match_mode),
-        follow_threshold,
-        neg_block_threshold,
-        k_merge_threshold,
-        weight_gain,
-        k_cap: k_cap as usize,
-        force_judge_on_cosine_hit: force_judge,
-    });
+    // 单一映射:写完 settings 即从 settings 派生(state.rs::connect 共用同一 builder,免发散)。
+    let pointer_cfg = st.pointer_config_from_settings();
+    st.memory.set_pointer_config(pointer_cfg);
     st.save_settings();
     Ok(())
 }
@@ -68,20 +62,10 @@ pub async fn set_retrieval_config(
     st.settings.retrieval_entry_min_sim = entry_min_sim;
     st.settings.retrieval_scan_batch = scan_batch;
     st.settings.retrieval_project_boost = project_boost;
-    // scan_max / chunk_min_chars 不在本命令参数里(避免破坏前端既有调用),沿用持久设置(默认 256 / 1500);
-    // 需要时单独旋钮接线。先取进局部(避免与下方 &mut st.memory 借用冲突)。
-    let scan_max = st.settings.retrieval_scan_max as usize;
-    let chunk_min_chars = st.settings.retrieval_chunk_min_chars as usize;
-    st.memory.set_retrieval_config(growbox_memory::RetrievalConfig {
-        rag_hit_threshold,
-        rag_topk: rag_topk as usize,
-        entry_k: entry_k as usize,
-        entry_min_sim,
-        scan_batch: scan_batch as usize,
-        scan_max,
-        project_boost,
-        chunk_min_chars,
-    });
+    // scan_max / chunk_min_chars 不在本命令参数里(避免破坏前端既有调用),由 builder 从 settings 取(沿用持久值,
+    // 与 state.rs::connect 同一 builder,免两份映射发散)。
+    let retrieval_cfg = st.retrieval_config_from_settings();
+    st.memory.set_retrieval_config(retrieval_cfg);
     st.save_settings();
     Ok(())
 }
@@ -105,15 +89,8 @@ pub async fn set_transient_caps(
     st.settings.transient_artifact_interactions_cap = artifact_interactions_cap.max(1);
     st.settings.transient_neg_review_max_age_days = neg_review_max_age_days.max(1);
     st.settings.transient_neg_review_max_edges = neg_review_max_edges.max(1);
-    // 先取值成局部(经 MutexGuard 解引用读 settings),再写 memory,避免同时借 st。
-    let caps = growbox_memory::TransientCapsConfig {
-        fragment_ledger_cap: st.settings.transient_fragment_ledger_cap as usize,
-        secondary_index_cap: st.settings.transient_secondary_index_cap as usize,
-        internal_events_cap: st.settings.transient_internal_events_cap as usize,
-        artifact_interactions_cap: st.settings.transient_artifact_interactions_cap as usize,
-        neg_review_max_age_ms: st.settings.transient_neg_review_max_age_days as i64 * 86_400_000,
-        neg_review_max_edges: st.settings.transient_neg_review_max_edges as usize,
-    };
+    // 先取值成局部(经 builder 读 settings,避免与 &mut st.memory 借用冲突);与 state.rs::connect 同一 builder。
+    let caps = st.transient_caps_from_settings();
     st.memory.set_transient_caps(caps);
     st.save_settings();
     Ok(())
@@ -131,11 +108,8 @@ pub async fn set_fatigue_config(
     st.settings.fatigue_w_hitrate = w_hitrate;
     st.settings.fatigue_w_evict = w_evict;
     st.settings.fatigue_w_fragment = w_fragment;
-    st.memory.set_fatigue_config(growbox_memory::FatigueConfig {
-        w_hitrate: w_hitrate as f64,
-        w_evict: w_evict as f64,
-        w_fragment: w_fragment as f64,
-    });
+    let fatigue_cfg = st.fatigue_config_from_settings();
+    st.memory.set_fatigue_config(fatigue_cfg);
     st.save_settings();
     Ok(())
 }
@@ -318,14 +292,8 @@ pub async fn set_tool_limits(
     st.settings.context_window_tokens = context_window_tokens.max(1024);
     // shell 命令墙钟超时秒(0=不限,慎用;不 clamp,允许用户显式关掉超时)。
     st.settings.shell_timeout_secs = shell_timeout_secs;
-    // 先取值成局部(经 MutexGuard 解引用读 settings),再分别写 registry/task_mgr,避免同时借 st。
-    let limits = growbox_core::ToolLimits {
-        max_read_bytes: st.settings.tool_max_read_bytes as usize,
-        max_list_entries: st.settings.tool_max_list_entries as usize,
-        max_output_bytes: st.settings.tool_max_output_bytes as usize,
-        max_outline_symbols: st.settings.tool_max_outline_symbols as usize,
-        shell_timeout_secs: st.settings.shell_timeout_secs as u64,
-    };
+    // 先取值成局部(经 builder 读 settings,避免与 &mut st.registry 借用冲突);与 state.rs::connect 同一 builder。
+    let limits = st.tool_limits_from_settings();
     let oc = st.settings.task_output_cap as usize;
     st.registry.set_limits(limits);
     st.task_mgr.set_output_cap(oc);

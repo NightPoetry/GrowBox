@@ -373,41 +373,17 @@ impl AppState {
         self.memory
             .set_cache_capacity(self.settings.neighbor_cache_cap as usize);
         // 学习型指针旋钮随用户设置(匹配档 + 4 阈值);推论9 数值全可设。
-        self.memory.set_pointer_config(growbox_memory::PointerConfig {
-            match_mode: growbox_memory::PointerMatchMode::from_setting(&self.settings.pointer_match_mode),
-            follow_threshold: self.settings.pointer_follow_threshold,
-            neg_block_threshold: self.settings.pointer_neg_block_threshold,
-            k_merge_threshold: self.settings.pointer_k_merge_threshold,
-            weight_gain: self.settings.pointer_weight_gain,
-            k_cap: self.settings.pointer_k_cap as usize,
-            force_judge_on_cosine_hit: self.settings.pointer_force_judge,
-        });
+        let pointer_cfg = self.pointer_config_from_settings();
+        self.memory.set_pointer_config(pointer_cfg);
         // 检索行为旋钮随用户设置(RAG 命中阈/候选数 + 精确层入口/批量);推论9 数值全可设。
-        self.memory.set_retrieval_config(growbox_memory::RetrievalConfig {
-            rag_hit_threshold: self.settings.retrieval_rag_hit_threshold,
-            rag_topk: self.settings.retrieval_rag_topk as usize,
-            entry_k: self.settings.retrieval_entry_k as usize,
-            entry_min_sim: self.settings.retrieval_entry_min_sim,
-            scan_batch: self.settings.retrieval_scan_batch as usize,
-            scan_max: self.settings.retrieval_scan_max as usize,
-            project_boost: self.settings.retrieval_project_boost,
-            chunk_min_chars: self.settings.retrieval_chunk_min_chars as usize,
-        });
+        let retrieval_cfg = self.retrieval_config_from_settings();
+        self.memory.set_retrieval_config(retrieval_cfg);
         // 疲劳公式权重旋钮随用户设置(推论9 数值全可设)。
-        self.memory.set_fatigue_config(growbox_memory::FatigueConfig {
-            w_hitrate: self.settings.fatigue_w_hitrate as f64,
-            w_evict: self.settings.fatigue_w_evict as f64,
-            w_fragment: self.settings.fatigue_w_fragment as f64,
-        });
+        let fatigue_cfg = self.fatigue_config_from_settings();
+        self.memory.set_fatigue_config(fatigue_cfg);
         // 瞬态容量旋钮随用户设置(碎片/二级/内部环 cap + 反K复核;天换算成毫秒;推论9 数值全可设)。
-        self.memory.set_transient_caps(growbox_memory::TransientCapsConfig {
-            fragment_ledger_cap: self.settings.transient_fragment_ledger_cap as usize,
-            secondary_index_cap: self.settings.transient_secondary_index_cap as usize,
-            internal_events_cap: self.settings.transient_internal_events_cap as usize,
-            artifact_interactions_cap: self.settings.transient_artifact_interactions_cap as usize,
-            neg_review_max_age_ms: self.settings.transient_neg_review_max_age_days as i64 * 86_400_000,
-            neg_review_max_edges: self.settings.transient_neg_review_max_edges as usize,
-        });
+        let transient_caps = self.transient_caps_from_settings();
+        self.memory.set_transient_caps(transient_caps);
         // Skill 系统旋钮随用户设置(总开关 + 清单上限 + 停用名单;设计/09,数值/开关全可设)。
         self.memory.set_skill_config(growbox_memory::SkillConfig {
             enabled: self.settings.skill_enabled,
@@ -422,13 +398,8 @@ impl AppState {
         );
         self.task_mgr.set_output_cap(self.settings.task_output_cap as usize);
         // 工具输出上限旋钮随用户设置(经 Registry → ExecCtx 注入执行器;推论9 数值全可设)。
-        self.registry.set_limits(growbox_core::ToolLimits {
-            max_read_bytes: self.settings.tool_max_read_bytes as usize,
-            max_list_entries: self.settings.tool_max_list_entries as usize,
-            max_output_bytes: self.settings.tool_max_output_bytes as usize,
-            max_outline_symbols: self.settings.tool_max_outline_symbols as usize,
-            shell_timeout_secs: self.settings.shell_timeout_secs as u64,
-        });
+        let tool_limits = self.tool_limits_from_settings();
+        self.registry.set_limits(tool_limits);
         // Web 工具配置随用户设置(搜索 provider/端点/key + 条数/超时;推论9 数值全可设)。
         self.registry.set_web_config(self.web_config_from_settings());
         // ★二期 C1★:懒加载总开关 + deferred 名单随用户设置(关=旧行为;开=核心常驻+tool_search 按需加载)。
@@ -543,6 +514,67 @@ impl AppState {
             api_key: self.settings.web_search_api_key.trim().to_string(),
             max_results: self.settings.web_search_max_results.clamp(1, 10),
             timeout_secs: self.settings.web_timeout_secs as u64,
+        }
+    }
+
+    // ★Settings → 各子系统配置的单一映射★:connect() 与 cmds/config.rs 各 setter 共用这些 builder,
+    // 消除两处手抄 struct 字面量与发散风险(同 web_config_from_settings 模式;健康体检 Tier2c)。
+    /// Settings → 学习型指针配置(匹配档 + 4 阈值 + k_cap + force_judge)。
+    pub(crate) fn pointer_config_from_settings(&self) -> growbox_memory::PointerConfig {
+        growbox_memory::PointerConfig {
+            match_mode: growbox_memory::PointerMatchMode::from_setting(&self.settings.pointer_match_mode),
+            follow_threshold: self.settings.pointer_follow_threshold,
+            neg_block_threshold: self.settings.pointer_neg_block_threshold,
+            k_merge_threshold: self.settings.pointer_k_merge_threshold,
+            weight_gain: self.settings.pointer_weight_gain,
+            k_cap: self.settings.pointer_k_cap as usize,
+            force_judge_on_cosine_hit: self.settings.pointer_force_judge,
+        }
+    }
+
+    /// Settings → 检索行为配置(RAG 阈/候选 + 精确层入口/批量 + 项目偏好 + 分块下限)。
+    pub(crate) fn retrieval_config_from_settings(&self) -> growbox_memory::RetrievalConfig {
+        growbox_memory::RetrievalConfig {
+            rag_hit_threshold: self.settings.retrieval_rag_hit_threshold,
+            rag_topk: self.settings.retrieval_rag_topk as usize,
+            entry_k: self.settings.retrieval_entry_k as usize,
+            entry_min_sim: self.settings.retrieval_entry_min_sim,
+            scan_batch: self.settings.retrieval_scan_batch as usize,
+            scan_max: self.settings.retrieval_scan_max as usize,
+            project_boost: self.settings.retrieval_project_boost,
+            chunk_min_chars: self.settings.retrieval_chunk_min_chars as usize,
+        }
+    }
+
+    /// Settings → 疲劳公式权重配置(命中率低/淘汰/碎片三权重)。
+    pub(crate) fn fatigue_config_from_settings(&self) -> growbox_memory::FatigueConfig {
+        growbox_memory::FatigueConfig {
+            w_hitrate: self.settings.fatigue_w_hitrate as f64,
+            w_evict: self.settings.fatigue_w_evict as f64,
+            w_fragment: self.settings.fatigue_w_fragment as f64,
+        }
+    }
+
+    /// Settings → 瞬态容量配置(碎片/二级/内部环 cap + 反K复核;天换算毫秒)。
+    pub(crate) fn transient_caps_from_settings(&self) -> growbox_memory::TransientCapsConfig {
+        growbox_memory::TransientCapsConfig {
+            fragment_ledger_cap: self.settings.transient_fragment_ledger_cap as usize,
+            secondary_index_cap: self.settings.transient_secondary_index_cap as usize,
+            internal_events_cap: self.settings.transient_internal_events_cap as usize,
+            artifact_interactions_cap: self.settings.transient_artifact_interactions_cap as usize,
+            neg_review_max_age_ms: self.settings.transient_neg_review_max_age_days as i64 * 86_400_000,
+            neg_review_max_edges: self.settings.transient_neg_review_max_edges as usize,
+        }
+    }
+
+    /// Settings → 工具输出上限(经 Registry → ExecCtx 注入执行器)。
+    pub(crate) fn tool_limits_from_settings(&self) -> growbox_core::ToolLimits {
+        growbox_core::ToolLimits {
+            max_read_bytes: self.settings.tool_max_read_bytes as usize,
+            max_list_entries: self.settings.tool_max_list_entries as usize,
+            max_output_bytes: self.settings.tool_max_output_bytes as usize,
+            max_outline_symbols: self.settings.tool_max_outline_symbols as usize,
+            shell_timeout_secs: self.settings.shell_timeout_secs as u64,
         }
     }
 
