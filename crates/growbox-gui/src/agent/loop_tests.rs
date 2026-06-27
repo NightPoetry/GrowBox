@@ -140,7 +140,8 @@ fn bare_text(text: &str) -> Vec<StreamChunk> {
 }
 
 fn cfg() -> AgentConfig {
-    AgentConfig { model: "m".into(), max_tokens: 8192, max_turns: 8, parallel_max: 4, system_prompt: "你是助手".into(), prompt_lang: "zh".into(), auto_mode: false, danger_mode: false, privacy_dirs: vec![], max_token_retries: 2, token_ceil: 32_768, silence_secs: 90, max_stall: 2, reasoning_effort: "max".into(), branch_log_max_gb: -1.0, self_verify: false, self_verify_min_tools: 3, recall_in_loop: false, tool_memory_enabled: false, tool_memory_veto_threshold: 0.85, tool_memory_warn_threshold: 0.80 }
+    // 仅列与基线不同的字段;其余经 AgentConfig::default()(测试基线)兜底,加新字段不必改本处。
+    AgentConfig { model: "m".into(), system_prompt: "你是助手".into(), ..Default::default() }
 }
 
 /// 定位测试用 rust-analyzer 并设环境变量(让 LspManager 经 env 找到它):env → 仓库 `.tooling/ra`。

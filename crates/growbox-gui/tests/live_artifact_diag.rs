@@ -104,12 +104,7 @@ async fn diag_gomoku_event_sequence() {
         // 默认 high(真实默认);设 GX_EFFORT=max 跑对比(定位 252s 是否=max)。
         reasoning_effort: std::env::var("GX_EFFORT").unwrap_or_else(|_| "high".into()),
         branch_log_max_gb: -1.0,
-        self_verify: false,
-        self_verify_min_tools: 3,
-        recall_in_loop: false,
-        tool_memory_enabled: false,
-        tool_memory_veto_threshold: 0.85,
-        tool_memory_warn_threshold: 0.80,
+        ..Default::default()
     };
 
     let msg = "陪我下五子棋,先把棋盘画出来。";
@@ -199,12 +194,7 @@ async fn diag_cancel_latency() {
         max_stall: 2,
         reasoning_effort: "high".into(),
         branch_log_max_gb: -1.0,
-        self_verify: false,
-        self_verify_min_tools: 3,
-        recall_in_loop: false,
-        tool_memory_enabled: false,
-        tool_memory_veto_threshold: 0.85,
-        tool_memory_warn_threshold: 0.80,
+        ..Default::default()
     };
     println!("\n========== 终止响应延迟实测 ==========");
     let out = agent_loop(

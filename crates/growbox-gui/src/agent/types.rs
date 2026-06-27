@@ -3,7 +3,7 @@
 //! 这些是脊柱与上层(Tauri sink / 测试收集器)之间的契约,故单独成文件、由 `mod.rs`
 //! 经 `pub use types::*` 重导出(外部仍按 `agent::AgentEvent` 等路径引用,不变)。
 
-use growbox_core::UiIntent;
+use growbox_core::{Settings, UiIntent};
 
 use crate::decision::{Decision, DecisionKind};
 use crate::ui::UiAck;
@@ -127,6 +127,68 @@ pub struct AgentConfig {
     pub tool_memory_veto_threshold: f32,
     /// 工具记忆「失败」软提醒相似度阈(默认 0.80):≥ 此 → 执行前注入"曾在类似情况失败"提醒(不阻断)。
     pub tool_memory_warn_threshold: f32,
+}
+
+impl Default for AgentConfig {
+    /// 测试/基线默认。**生产经 `From<&Settings>` 构建,不走这里**——故此处取测试基线值(各 feature 默认关、
+    /// 阈值取测试值),好让测试用 `..Default::default()` 只列自己关心的字段、加新字段不必逐个测试补一行。
+    fn default() -> Self {
+        Self {
+            model: String::new(),
+            max_tokens: 8192,
+            max_turns: 8,
+            parallel_max: 4,
+            system_prompt: String::new(),
+            prompt_lang: "zh".into(),
+            auto_mode: false,
+            danger_mode: false,
+            privacy_dirs: vec![],
+            max_token_retries: 2,
+            token_ceil: 32_768,
+            silence_secs: 90,
+            max_stall: 2,
+            reasoning_effort: "max".into(),
+            branch_log_max_gb: -1.0,
+            self_verify: false,
+            self_verify_min_tools: 3,
+            recall_in_loop: false,
+            tool_memory_enabled: false,
+            tool_memory_veto_threshold: 0.85,
+            tool_memory_warn_threshold: 0.80,
+        }
+    }
+}
+
+impl From<&Settings> for AgentConfig {
+    /// 从持久化 `Settings` 派生运行配置(生产唯一构造路径,收敛 chat/supervisor 两处手抄)。
+    /// `system_prompt` 不在 Settings 里(需 base_prompt + 项目上下文拼),留空由调用方填;其余按 Settings
+    /// 原样映射(含 as 类型转换 / lang→prompt_lang 重命名)。造物秒级回合 / 后台 Supervisor 的差异由调用方
+    /// 在此基础上**显式覆盖**(集中、意图清晰,胜过把条件散在 20 行字面量里各写一遍)。
+    fn from(s: &Settings) -> Self {
+        Self {
+            model: s.model.clone(),
+            max_tokens: s.max_tokens,
+            max_turns: s.max_turns,
+            parallel_max: s.parallel_max as usize,
+            system_prompt: String::new(),
+            prompt_lang: s.lang.clone(),
+            auto_mode: s.auto_mode,
+            danger_mode: s.danger_mode,
+            privacy_dirs: s.privacy_dirs.clone(),
+            max_token_retries: s.agent_max_token_retries as usize,
+            token_ceil: s.agent_token_ceil,
+            silence_secs: s.agent_silence_secs as u64,
+            max_stall: s.agent_max_stall as usize,
+            reasoning_effort: s.reasoning_effort.clone(),
+            branch_log_max_gb: s.branch_log_max_gb,
+            self_verify: s.self_verify,
+            self_verify_min_tools: s.self_verify_min_tools as usize,
+            recall_in_loop: s.recall_in_loop,
+            tool_memory_enabled: s.tool_memory_enabled,
+            tool_memory_veto_threshold: s.tool_memory_veto_threshold,
+            tool_memory_warn_threshold: s.tool_memory_warn_threshold,
+        }
+    }
 }
 
 /// 循环为何停下。

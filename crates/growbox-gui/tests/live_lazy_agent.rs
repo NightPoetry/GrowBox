@@ -60,12 +60,7 @@ fn cfg() -> AgentConfig {
         max_stall: 2,
         reasoning_effort: "high".into(),
         branch_log_max_gb: -1.0,
-        self_verify: false,
-        self_verify_min_tools: 3,
-        recall_in_loop: false,
-        tool_memory_enabled: false,
-        tool_memory_veto_threshold: 0.85,
-        tool_memory_warn_threshold: 0.80,
+        ..Default::default()
     }
 }
 

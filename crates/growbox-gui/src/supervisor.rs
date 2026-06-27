@@ -111,30 +111,12 @@ async fn supervisor_loop(
                 let Some(bridge) = st.bridge.clone() else { continue; };
 
                 let full_prompt = format!("{}\n\n{}", st.base_system_prompt, st.project_context());
-                let cfg = AgentConfig {
-                    model: st.settings.model.clone(),
-                    max_tokens: st.settings.max_tokens,
-                    max_turns: st.settings.max_turns.min(4), // Supervisor 回合限制轮数,防失控。
-                    parallel_max: st.settings.parallel_max as usize,
-                    system_prompt: full_prompt,
-                    prompt_lang: st.settings.lang.clone(),
-                    auto_mode: st.settings.auto_mode,
-                    danger_mode: st.settings.danger_mode, // 跟随设置(danger 是全局模式)
-                    privacy_dirs: st.settings.privacy_dirs.clone(),
-                    max_token_retries: st.settings.agent_max_token_retries as usize,
-                    token_ceil: st.settings.agent_token_ceil,
-                    silence_secs: st.settings.agent_silence_secs as u64,
-                    max_stall: st.settings.agent_max_stall as usize,
-                    reasoning_effort: st.settings.reasoning_effort.clone(),
-                    branch_log_max_gb: st.settings.branch_log_max_gb,
-                    self_verify: false, // Supervisor 后台回合:不自检(省 token,且非用户面结论)
-                    self_verify_min_tools: st.settings.self_verify_min_tools as usize,
-                    recall_in_loop: st.settings.recall_in_loop, // 后台回合也按用户设置补检索(轮数已限 4,成本有界)
-                    // 工具记忆:后台 Supervisor 回合也按用户设置会诊(同样别犯第二遍)。
-                    tool_memory_enabled: st.settings.tool_memory_enabled,
-                    tool_memory_veto_threshold: st.settings.tool_memory_veto_threshold,
-                    tool_memory_warn_threshold: st.settings.tool_memory_warn_threshold,
-                };
+                // 运行配置从 Settings 派生(单一映射在 AgentConfig::from);后台 Supervisor 回合的差异在此显式覆盖。
+                let mut cfg = AgentConfig::from(&st.settings);
+                cfg.system_prompt = full_prompt;
+                cfg.max_turns = cfg.max_turns.min(4); // Supervisor 回合限制轮数,防失控。
+                cfg.self_verify = false; // 后台回合:不自检(省 token,且非用户面结论)。
+                // 其余跟随设置(danger/reasoning_effort/补检索/工具记忆均经 From 取 Settings 值)。
                 st.sandbox.set_danger(cfg.danger_mode); // 与 cfg 同步(judge 据此放行)
                 let work_dir = st.work_dir.clone();
                 let sink = SupervisorSink { app: app.clone() };

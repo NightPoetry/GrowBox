@@ -413,40 +413,21 @@ async fn run_chat(
         &st.base_system_prompt,
     );
     let full_prompt = format!("{}\n\n{}", base, st.project_context());
-    let cfg = AgentConfig {
-        model: st.settings.model.clone(),
-        max_tokens: st.settings.max_tokens,
-        // ★造物交互回合限轮数(防失控)★:用户落子等触发的 ArtifactSink 回合静默不进聊天,
-        // 若放任 max_turns=1000,AI 会把"更新棋盘"当无限可优化的事反复 render(每次样式略不同,
-        // 思考免死的"近乎全等"判不出 → 不收口),致画布一直刷而聊天早停(用户 2026-06-04 真机惊到)。
-        // 造物响应应收敛:更新一次回应交互即可。限 4 轮(render→可能 selftest→finish)。
-        max_turns: if artifact.is_some() { st.settings.max_turns.min(4) } else { st.settings.max_turns },
-        parallel_max: st.settings.parallel_max as usize,
-        system_prompt: full_prompt,
-        prompt_lang: st.settings.lang.clone(),
-        auto_mode: st.settings.auto_mode,
-        // ★danger 模式(为所欲为)★:跟随设置。造物交互回合不放开(秒级响应、用户在场,无需 danger)。
-        danger_mode: st.settings.danger_mode && artifact.is_none(),
-        privacy_dirs: st.settings.privacy_dirs.clone(),
-        max_token_retries: st.settings.agent_max_token_retries as usize,
-        token_ceil: st.settings.agent_token_ceil,
-        silence_secs: st.settings.agent_silence_secs as u64,
-        max_stall: st.settings.agent_max_stall as usize,
-        // ★造物交互响应用 high(快回)★:用户落子等交互要秒级响应,max effort 会思考几分钟
-        // (实测画棋盘 reasoning 5 万字/234s),致落子像没反应、用户反复点 → 积压回合陆续刷屏
-        // (2026-06-04 真机"没法点击/造物不断出现"真因)。响应回合降 high;主回合保持用户设置。
-        reasoning_effort: if artifact.is_some() { "high".into() } else { st.settings.reasoning_effort.clone() },
-        branch_log_max_gb: st.settings.branch_log_max_gb,
-        // ★主动自检★:造物交互回合要秒级响应、不自检(避免多花一轮);普通任务按用户设置。
-        self_verify: st.settings.self_verify && artifact.is_none(),
-        self_verify_min_tools: st.settings.self_verify_min_tools as usize,
-        // ★回合内补检索★:造物交互回合要秒级响应、不补检索(避免每轮多一次嵌入/检索延迟);普通任务按用户设置。
-        recall_in_loop: st.settings.recall_in_loop && artifact.is_none(),
-        // ★工具记忆 + 不犯第二遍★:造物交互回合要秒级响应,不会诊(省一次嵌入);普通任务按用户设置。
-        tool_memory_enabled: st.settings.tool_memory_enabled && artifact.is_none(),
-        tool_memory_veto_threshold: st.settings.tool_memory_veto_threshold,
-        tool_memory_warn_threshold: st.settings.tool_memory_warn_threshold,
-    };
+    // 运行配置从 Settings 派生(单一映射在 AgentConfig::from);system_prompt 与造物回合覆盖在此显式补。
+    let mut cfg = AgentConfig::from(&st.settings);
+    cfg.system_prompt = full_prompt;
+    // ★造物交互回合(秒级响应)集中覆盖★:用户落子等触发的 ArtifactSink 回合静默不进聊天——
+    // ① 限 4 轮防失控(否则 AI 把"更新棋盘"当无限可优化反复 render,样式略不同判不出"近乎全等"不收口,
+    //    画布狂刷而聊天早停,2026-06-04 真机惊到);② 降 high(max 会思考几分钟,落子像没反应、积压刷屏);
+    // ③ 关自检/补检索/工具记忆(都为省那一轮/一次嵌入延迟);④ 不放开 danger(用户在场、无需)。
+    if artifact.is_some() {
+        cfg.max_turns = cfg.max_turns.min(4);
+        cfg.reasoning_effort = "high".into();
+        cfg.self_verify = false;
+        cfg.recall_in_loop = false;
+        cfg.tool_memory_enabled = false;
+        cfg.danger_mode = false;
+    }
     // ★danger 模式★:把 sandbox 的 danger 标志与本回合 cfg 同步(judge 据此一律放行)。两处同源、每回合校准。
     st.sandbox.set_danger(cfg.danger_mode);
     let work_dir = st.work_dir.clone();
