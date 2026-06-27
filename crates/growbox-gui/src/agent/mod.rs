@@ -165,32 +165,21 @@ struct EnteredWf {
     max_loops: i64,
 }
 
+/// 脊柱开头的上下文装配前奏(阶段①,从 `run_agent_loop` 抽出,零行为变更)。
+/// 拼系统提示(+deferred 懒加载清单 +skill 常驻清单)→ `assemble_context` 检索调入工作记忆区/ring →
+/// 项目级流程配方(建议档/可执行档物化)+ skill 语义召回 → seed_internal(内部消息)或 user 消息入场。
+/// 返回 (初始 messages, materialized 物化工作流名集);两者随后在脊柱循环里继续被改。
 #[allow(clippy::too_many_arguments)]
-async fn run_agent_loop(
+async fn assemble_loop_prelude(
     user_msg: &str,
     seed_internal: bool,
-    initial_wf: Option<(String, String)>,
+    self_drive: bool,
+    transient: bool,
     cfg: &AgentConfig,
-    llm: &dyn LlmDriver,
     registry: &Registry,
-    sandbox: &Sandbox,
     memory: &mut Memory,
     subconscious: &dyn Subconscious,
-    reasoner: &dyn Reasoner,
-    flywheel: &Flywheel,
-    work_dir: &Path,
-    sink: &dyn EventSink,
-    // ★流式窗口记忆(transient)★:true = 本回合是"观察/共驾的瞬态轮"(如交互终端事件点唤醒),
-    // seed/工具转录/收尾**不写主记忆/RAG/飞轮**,只进上下文+展示给用户(用户铁律:观察一般不入主记忆,
-    // 除非值得关注的值)。失败仍 perceive(值得关注)。false = 正常持久回合。
-    transient: bool,
-    // ★自驱续跑★:true = 自动鞭策种子。完整种子作本轮系统消息让 AI 看到,但**不把全文 ingest 进时间线**
-    // (P3:防几百轮重复种子膨胀 + recent-ring 被鞭策噪音挤占);记录交 run_chat 的精简 SELF_DRIVE 标记。
-    self_drive: bool,
-    // ★并行子代理总开关(设计/07-附录-并行子代理)★:true=主链(本轮 ≥2 个 isolated 调查员调用可并发扇出);
-    // false=一次性子运行内(禁并行批,防 fork-bomb / 无限递归)。主入口恒 true,run_investigator 传 false。
-    allow_parallel: bool,
-) -> AgentOutcome {
+) -> (Vec<ChatMessage>, HashSet<String>) {
     // ① 组装上下文(P4 记忆置换系统,稳定→易变,命中 prompt 缓存):
     //    system prompt(最稳) → 工作记忆区(指针调入,两态) → 8K 最近 ring(最末) → 当前回合。
     //    置换策略在 memory(llm 无关);此处只套"每区独特标记 + 时间戳 + 按时间戳判序"的外壳。
@@ -266,6 +255,193 @@ async fn run_agent_loop(
         messages.push(ChatMessage::user(user_msg));
         memory.ingest_with_role(user_msg, "user");
     }
+    (messages, materialized)
+}
+
+/// 工作流栈流转(阶段⑩,从 `run_agent_loop` 抽出,零行为变更)。据本轮"进入了哪个子工作流 / 是否
+/// workflow_return / 调过哪些工具"更新 wf_stack:进入子工作流压栈(直接调用=尾替换栈顶、栈深不增;
+/// 栈调用=新分支);workflow_return 出栈一层 + 回灌返回值;再跑强制流转级联(END/容错/达上限出栈,
+/// 多层连环返回)。就地改 wf_stack / context_floor / messages(append-only,缓存稳),并 emit 流转通知。
+#[allow(clippy::too_many_arguments)]
+async fn advance_workflow_stack(
+    entered_wf: Option<EnteredWf>,
+    pending_return: Option<(String, bool)>,
+    called_tools: Vec<String>,
+    wf_stack: &mut Vec<WfFrame>,
+    context_floor: &mut usize,
+    messages: &mut Vec<ChatMessage>,
+    registry: &Registry,
+    cfg: &AgentConfig,
+    sink: &dyn EventSink,
+) {
+    // cascade_from = None → 刚进入新(子)工作流,不级联(下一轮跑新节点);
+    // cascade_from = Some(pending_called) → 跑强制流转级联(含 END/达上限出栈、多层连环返回)。
+    let cascade_from: Option<Vec<String>> = if let Some(ent) = entered_wf {
+        // ★直接调用循环上限(v2 原则8)★:分支内用直接调用循环、超主 LLM 设的 max_loops → 强制返回入口栈(防失控)。
+        let loop_blocked = ent.direct
+            && wf_stack.last().map(|f| f.max_loops >= 0 && f.loops_used + 1 > f.max_loops).unwrap_or(false);
+        if loop_blocked {
+            let popped = wf_stack.pop().expect("loop_blocked 蕴含栈非空");
+            if popped.discards_on_exit() {
+                messages.truncate(popped.msg_base);
+            }
+            *context_floor = popped.prev_floor;
+            messages.push(ChatMessage::system(format!(
+                "[工作流「{}」已达最大循环次数 {},自动返回上层]",
+                popped.wf, popped.max_loops
+            )));
+            sink.emit(AgentEvent::Notice(format!("工作流「{}」达最大循环次数,已返回", popped.wf))).await;
+            Some(vec![popped.wf]) // 让调用方据"调过该子工作流"续流转。
+        } else {
+            // ★进入(子)工作流★:开场 = 节点引导 + 调用方 input + 返回契约(一条 system,缓存稳)。
+            // isolated 帧据此切片裁剪上下文;返回契约点醒"最少充分信息"默认。
+            let opening = {
+                let node = registry.workflow(&ent.wf).and_then(|wf| wf.node(&ent.entry).cloned());
+                let mut s = match &node {
+                    Some(n) => node_guidance(&ent.wf, n, &cfg.prompt_lang),
+                    None => format!("工作流「{}」入口节点「{}」不存在", ent.wf, ent.entry),
+                };
+                if let Some(inp) = &ent.input {
+                    s.push_str(&format!("\n\n[调用方输入]\n{inp}"));
+                }
+                if let Some(rs) = &ent.return_spec {
+                    s.push_str(&format!(
+                        "\n\n[调用方要求你返回(完成后调 workflow_return,value 按此格式;\
+                         默认只回最少充分信息=错误/警告/结论,别把全量原始内容搬运回去)]\n{rs}"
+                    ));
+                }
+                s
+            };
+            // 直接调用(尾调用):先优雅出栈当前帧再压新帧 = 替换栈顶,栈深不增(防主循环式工作流栈溢出);
+            // 沿用被替换帧的链身份 + 循环计数+1 + 入口栈设的 max_loops。栈调用 = 新派生分支(从零计)。
+            let mut inherited_branch = false;
+            let mut next_loops = 0i64;
+            let mut next_max = ent.max_loops;
+            if ent.direct {
+                if let Some(popped) = wf_stack.pop() {
+                    if popped.discards_on_exit() {
+                        messages.truncate(popped.msg_base);
+                    }
+                    *context_floor = popped.prev_floor;
+                    inherited_branch = popped.is_branch;
+                    next_loops = popped.loops_used + 1;
+                    next_max = popped.max_loops;
+                }
+            }
+            let msg_base = messages.len();
+            messages.push(ChatMessage::system(opening));
+            let prev_floor = *context_floor;
+            if ent.isolated {
+                *context_floor = msg_base; // 隔离:抬高地板,父对话此后被隐藏(裁剪上下文)。
+            }
+            let is_branch = if ent.direct { inherited_branch } else { true };
+            wf_stack.push(WfFrame {
+                wf: ent.wf,
+                node: ent.entry,
+                isolated: ent.isolated,
+                fork: ent.fork,
+                msg_base,
+                prev_floor,
+                is_branch,
+                max_loops: next_max,
+                loops_used: next_loops,
+            });
+            None // 刚进入,不级联(下一轮跑新节点)。
+        }
+    } else {
+        // 起手 pending_called = 本轮真实工具;workflow_return 则先强制出栈当前帧(回灌返回值)再以"调过该工作流"喂父。
+        let mut pending_called: Vec<String> = called_tools;
+        // ★workflow_return:被调工作流显式返回 → 出栈一层 + 回灌返回值(栈函数 v2 原则4)★。
+        if let Some((value, full)) = pending_return {
+            if let Some(frame) = wf_stack.pop() {
+                // 默认(full=false):isolated 截断分支工作消息(最少充分信息,退出即丢)。
+                // full=true:不截断,分支原始工作上下文直通回父(零 LLM 搬运;慎用,污染主上下文)。
+                if frame.discards_on_exit() && !full {
+                    messages.truncate(frame.msg_base);
+                }
+                *context_floor = frame.prev_floor;
+                if !value.is_empty() {
+                    messages.push(ChatMessage::system(format!("[工作流「{}」返回]\n{value}", frame.wf)));
+                } else if full {
+                    messages.push(ChatMessage::system(format!("[工作流「{}」全量返回:见上方该分支原始输出]", frame.wf)));
+                }
+                sink.emit(AgentEvent::Notice(format!("工作流「{}」已返回", frame.wf))).await;
+                pending_called = vec![frame.wf];
+            }
+        }
+        Some(pending_called)
+    };
+
+    // ★强制流转级联★:据 pending_called 判流转;END/容错/达上限出栈统一处理 isolated 截断 + 恢复 context_floor;
+    // 出栈后以"出栈工作流名"喂父续判(级联,多层 END 连环返回)。刚进入新工作流(None)则跳过。
+    if let Some(mut pending_called) = cascade_from {
+        while let Some(frame) = wf_stack.last().cloned() {
+            let Some(wf) = registry.workflow(&frame.wf) else { break };
+            let Some(target) = wf.node(&frame.node).and_then(|n| n.transition_for(&pending_called)).map(str::to_string) else {
+                break; // 无匹配流转 → 留在原节点(工具仍按本节点收窄,引导已在历史)。
+            };
+            if target == END_NODE {
+                let popped = wf_stack.pop().expect("last 已确认存在");
+                if popped.discards_on_exit() {
+                    messages.truncate(popped.msg_base); // END 无显式返回值:分支退出即丢工作消息(isolated/fork)。
+                }
+                *context_floor = popped.prev_floor;
+                sink.emit(AgentEvent::Notice(format!("工作流「{}」已完成", popped.wf))).await;
+                pending_called = vec![popped.wf]; // 返回父级:父节点据"调过该子工作流"再判(级联)。
+                continue;
+            } else if let Some(next_node) = wf.node(&target) {
+                // 流转到新节点:把新节点引导作为 system 追加进历史(append-only,缓存稳),工具下轮收窄。
+                messages.push(ChatMessage::system(node_guidance(&frame.wf, next_node, &cfg.prompt_lang)));
+                if let Some(top) = wf_stack.last_mut() {
+                    top.node = target;
+                }
+                break;
+            } else {
+                let popped = wf_stack.pop().expect("last 已确认存在");
+                if popped.discards_on_exit() {
+                    messages.truncate(popped.msg_base);
+                }
+                *context_floor = popped.prev_floor;
+                sink.emit(AgentEvent::Notice(format!("工作流「{}」目标节点「{target}」不存在,已退出", popped.wf))).await;
+                pending_called = vec![popped.wf];
+                continue;
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_agent_loop(
+    user_msg: &str,
+    seed_internal: bool,
+    initial_wf: Option<(String, String)>,
+    cfg: &AgentConfig,
+    llm: &dyn LlmDriver,
+    registry: &Registry,
+    sandbox: &Sandbox,
+    memory: &mut Memory,
+    subconscious: &dyn Subconscious,
+    reasoner: &dyn Reasoner,
+    flywheel: &Flywheel,
+    work_dir: &Path,
+    sink: &dyn EventSink,
+    // ★流式窗口记忆(transient)★:true = 本回合是"观察/共驾的瞬态轮"(如交互终端事件点唤醒),
+    // seed/工具转录/收尾**不写主记忆/RAG/飞轮**,只进上下文+展示给用户(用户铁律:观察一般不入主记忆,
+    // 除非值得关注的值)。失败仍 perceive(值得关注)。false = 正常持久回合。
+    transient: bool,
+    // ★自驱续跑★:true = 自动鞭策种子。完整种子作本轮系统消息让 AI 看到,但**不把全文 ingest 进时间线**
+    // (P3:防几百轮重复种子膨胀 + recent-ring 被鞭策噪音挤占);记录交 run_chat 的精简 SELF_DRIVE 标记。
+    self_drive: bool,
+    // ★并行子代理总开关(设计/07-附录-并行子代理)★:true=主链(本轮 ≥2 个 isolated 调查员调用可并发扇出);
+    // false=一次性子运行内(禁并行批,防 fork-bomb / 无限递归)。主入口恒 true,run_investigator 传 false。
+    allow_parallel: bool,
+) -> AgentOutcome {
+    // ① 组装上下文前奏(P4 记忆置换,稳定→易变,命中缓存):系统提示(+deferred 懒加载清单 +skill 常驻清单)
+    //    → assemble_context 检索调入工作记忆区/ring → 项目级流程配方 + skill 语义召回 → seed/user 入场。
+    //    细节抽进 `assemble_loop_prelude`(把脊柱开头 ~75 行噪音收进有名字的阶段①,零行为变更)。
+    let (mut messages, materialized) =
+        assemble_loop_prelude(user_msg, seed_internal, self_drive, transient, cfg, registry, memory, subconscious)
+            .await;
 
     // 工具清单**每轮**按当前工作流节点计算(见下文 turn_tools):普通模式 = 全集 + 工作流动态入口工具;
     // 工作流节点内 = 收窄到节点工具子集(物理锁死选择空间,见 设计/07 推论1/6)。
@@ -1119,141 +1295,21 @@ async fn run_agent_loop(
             perceive_rust_diagnostics(registry.lsp_manager(), memory, &cfg.prompt_lang, work_dir, &edited_rs).await;
         }
 
-        // ★栈函数工作流流转(07 v2)★:本轮结束据"进入/返回/调用了什么"更新工作流栈。
-        // cascade_from = None → 刚进入新(子)工作流,不级联(下一轮跑新节点);
-        // cascade_from = Some(pending_called) → 跑强制流转级联(含 END/达上限出栈、多层连环返回)。
-        let cascade_from: Option<Vec<String>> = if let Some(ent) = entered_wf {
-            // ★直接调用循环上限(v2 原则8)★:分支内用直接调用循环、超主 LLM 设的 max_loops → 强制返回入口栈(防失控)。
-            let loop_blocked = ent.direct
-                && wf_stack.last().map(|f| f.max_loops >= 0 && f.loops_used + 1 > f.max_loops).unwrap_or(false);
-            if loop_blocked {
-                let popped = wf_stack.pop().expect("loop_blocked 蕴含栈非空");
-                if popped.discards_on_exit() {
-                    messages.truncate(popped.msg_base);
-                }
-                context_floor = popped.prev_floor;
-                messages.push(ChatMessage::system(format!(
-                    "[工作流「{}」已达最大循环次数 {},自动返回上层]",
-                    popped.wf, popped.max_loops
-                )));
-                sink.emit(AgentEvent::Notice(format!("工作流「{}」达最大循环次数,已返回", popped.wf))).await;
-                Some(vec![popped.wf]) // 让调用方据"调过该子工作流"续流转。
-            } else {
-                // ★进入(子)工作流★:开场 = 节点引导 + 调用方 input + 返回契约(一条 system,缓存稳)。
-                // isolated 帧据此切片裁剪上下文;返回契约点醒"最少充分信息"默认。
-                let opening = {
-                    let node = registry.workflow(&ent.wf).and_then(|wf| wf.node(&ent.entry).cloned());
-                    let mut s = match &node {
-                        Some(n) => node_guidance(&ent.wf, n, &cfg.prompt_lang),
-                        None => format!("工作流「{}」入口节点「{}」不存在", ent.wf, ent.entry),
-                    };
-                    if let Some(inp) = &ent.input {
-                        s.push_str(&format!("\n\n[调用方输入]\n{inp}"));
-                    }
-                    if let Some(rs) = &ent.return_spec {
-                        s.push_str(&format!(
-                            "\n\n[调用方要求你返回(完成后调 workflow_return,value 按此格式;\
-                             默认只回最少充分信息=错误/警告/结论,别把全量原始内容搬运回去)]\n{rs}"
-                        ));
-                    }
-                    s
-                };
-                // 直接调用(尾调用):先优雅出栈当前帧再压新帧 = 替换栈顶,栈深不增(防主循环式工作流栈溢出);
-                // 沿用被替换帧的链身份 + 循环计数+1 + 入口栈设的 max_loops。栈调用 = 新派生分支(从零计)。
-                let mut inherited_branch = false;
-                let mut next_loops = 0i64;
-                let mut next_max = ent.max_loops;
-                if ent.direct {
-                    if let Some(popped) = wf_stack.pop() {
-                        if popped.discards_on_exit() {
-                            messages.truncate(popped.msg_base);
-                        }
-                        context_floor = popped.prev_floor;
-                        inherited_branch = popped.is_branch;
-                        next_loops = popped.loops_used + 1;
-                        next_max = popped.max_loops;
-                    }
-                }
-                let msg_base = messages.len();
-                messages.push(ChatMessage::system(opening));
-                let prev_floor = context_floor;
-                if ent.isolated {
-                    context_floor = msg_base; // 隔离:抬高地板,父对话此后被隐藏(裁剪上下文)。
-                }
-                let is_branch = if ent.direct { inherited_branch } else { true };
-                wf_stack.push(WfFrame {
-                    wf: ent.wf,
-                    node: ent.entry,
-                    isolated: ent.isolated,
-                    fork: ent.fork,
-                    msg_base,
-                    prev_floor,
-                    is_branch,
-                    max_loops: next_max,
-                    loops_used: next_loops,
-                });
-                None // 刚进入,不级联(下一轮跑新节点)。
-            }
-        } else {
-            // 起手 pending_called = 本轮真实工具;workflow_return 则先强制出栈当前帧(回灌返回值)再以"调过该工作流"喂父。
-            let mut pending_called: Vec<String> = called_tools.clone();
-            // ★workflow_return:被调工作流显式返回 → 出栈一层 + 回灌返回值(栈函数 v2 原则4)★。
-            if let Some((value, full)) = pending_return {
-                if let Some(frame) = wf_stack.pop() {
-                    // 默认(full=false):isolated 截断分支工作消息(最少充分信息,退出即丢)。
-                    // full=true:不截断,分支原始工作上下文直通回父(零 LLM 搬运;慎用,污染主上下文)。
-                    if frame.discards_on_exit() && !full {
-                        messages.truncate(frame.msg_base);
-                    }
-                    context_floor = frame.prev_floor;
-                    if !value.is_empty() {
-                        messages.push(ChatMessage::system(format!("[工作流「{}」返回]\n{value}", frame.wf)));
-                    } else if full {
-                        messages.push(ChatMessage::system(format!("[工作流「{}」全量返回:见上方该分支原始输出]", frame.wf)));
-                    }
-                    sink.emit(AgentEvent::Notice(format!("工作流「{}」已返回", frame.wf))).await;
-                    pending_called = vec![frame.wf];
-                }
-            }
-            Some(pending_called)
-        };
-
-        // ★强制流转级联★:据 pending_called 判流转;END/容错/达上限出栈统一处理 isolated 截断 + 恢复 context_floor;
-        // 出栈后以"出栈工作流名"喂父续判(级联,多层 END 连环返回)。刚进入新工作流(None)则跳过。
-        if let Some(mut pending_called) = cascade_from {
-            while let Some(frame) = wf_stack.last().cloned() {
-                let Some(wf) = registry.workflow(&frame.wf) else { break };
-                let Some(target) = wf.node(&frame.node).and_then(|n| n.transition_for(&pending_called)).map(str::to_string) else {
-                    break; // 无匹配流转 → 留在原节点(工具仍按本节点收窄,引导已在历史)。
-                };
-                if target == END_NODE {
-                    let popped = wf_stack.pop().expect("last 已确认存在");
-                    if popped.discards_on_exit() {
-                        messages.truncate(popped.msg_base); // END 无显式返回值:分支退出即丢工作消息(isolated/fork)。
-                    }
-                    context_floor = popped.prev_floor;
-                    sink.emit(AgentEvent::Notice(format!("工作流「{}」已完成", popped.wf))).await;
-                    pending_called = vec![popped.wf]; // 返回父级:父节点据"调过该子工作流"再判(级联)。
-                    continue;
-                } else if let Some(next_node) = wf.node(&target) {
-                    // 流转到新节点:把新节点引导作为 system 追加进历史(append-only,缓存稳),工具下轮收窄。
-                    messages.push(ChatMessage::system(node_guidance(&frame.wf, next_node, &cfg.prompt_lang)));
-                    if let Some(top) = wf_stack.last_mut() {
-                        top.node = target;
-                    }
-                    break;
-                } else {
-                    let popped = wf_stack.pop().expect("last 已确认存在");
-                    if popped.discards_on_exit() {
-                        messages.truncate(popped.msg_base);
-                    }
-                    context_floor = popped.prev_floor;
-                    sink.emit(AgentEvent::Notice(format!("工作流「{}」目标节点「{target}」不存在,已退出", popped.wf))).await;
-                    pending_called = vec![popped.wf];
-                    continue;
-                }
-            }
-        }
+        // ★栈函数工作流流转(07 v2)★:据本轮"进入了哪个子工作流 / 是否 workflow_return / 调过哪些工具"更新工作流栈
+        // (进入压栈、直接调用尾替换、workflow_return 出栈回灌、END 级联连环返回)。全文最难读的一段,
+        // 抽进 `advance_workflow_stack` 独立成单元(就地改 wf_stack/context_floor/messages,零行为变更)。
+        advance_workflow_stack(
+            entered_wf,
+            pending_return,
+            called_tools,
+            &mut wf_stack,
+            &mut context_floor,
+            &mut messages,
+            registry,
+            cfg,
+            sink,
+        )
+        .await;
 
         if let Some(summary) = finished {
             // ★主动自检(grounded verification,用户 2026-06-08)★:任务做了实事(工具调用数 ≥ 阈值)、
