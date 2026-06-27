@@ -726,6 +726,46 @@ impl Memory {
         }
         blocks
     }
+
+    /// ★回合内补检索(in-loop supplementary retrieval)★:任务进行到一半,AI 才发现需要某信息
+    /// (例:开始 SSH 才意识到要用户名/密码),而上下文里没有——因为开场的 `assemble_context` 只按
+    /// **进场那一句用户消息**检索过一次。本方法让脊柱在循环里**用 AI 当下的思路/进展作新查询再检索一次**,
+    /// 把新命中的长期记忆**增量**调入工作区。
+    ///
+    /// 与 `assemble_context` 的区别:① 不组 8K ring(ring 由开场一次性给,循环内新事件靠 append-only 注入,
+    /// 不在此重复);② **只返回本次"真新调入"的块**——已常驻的经 `is_resident` 去重(仅刷新热度、不重复拼),
+    /// 故调用方据此决定是否追加一段"补充记忆"system 消息(无新命中则返回空、不打扰)。append-only 渲染保 KV 前缀稳。
+    /// 检索层判定(RAG→精确下沉)、置换计数(`page_in`)、`mind_search` 自我感知均复用 `retrieve`,与开场一致。
+    pub async fn supplement_context(&mut self, query: &str, sub: &dyn Subconscious) -> Vec<ContextBlock> {
+        let (hits, layer) = self.retrieve(query, sub).await;
+        let origin = match layer {
+            Layer::Rag => Origin::RagFake,
+            Layer::Exact => Origin::Llm,
+        };
+        let mut fresh = Vec::new();
+        for h in &hits {
+            // 去重必须在 page_in 之前判:page_in 会把命中变成常驻,之后再判恒为真。
+            // 已常驻 → page_in 仅刷新热度(原位不动),不收作新块;未常驻 → 调入 + 收作"真新块"回给调用方渲染。
+            let already = self.context.is_resident(&h.source);
+            let (role, ts, heat) = self
+                .timeline
+                .meta(&h.source)
+                .map(|m| (m.role.clone(), m.created_at, m.hits))
+                .unwrap_or_else(|| ("system".to_string(), growbox_core::now(), 0));
+            self.context
+                .page_in_with_origin(h.source.clone(), role.clone(), ts, h.content.clone(), heat, origin);
+            if !already {
+                fresh.push(ContextBlock {
+                    region: Region::Working,
+                    node_id: h.source.clone(),
+                    role,
+                    timestamp: ts,
+                    content: h.content.clone(),
+                });
+            }
+        }
+        fresh
+    }
 }
 
 /// 按 source 去重,保留首次出现顺序(强制跳转 + mesh 前沿可能召回同一节点)。

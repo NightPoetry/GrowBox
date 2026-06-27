@@ -40,8 +40,8 @@ pub use types::{AgentConfig, AgentEvent, AgentOutcome, EventSink, StopReason};
 use drive::drive_one;
 use render::{
     claim_kind, claim_target, degenerate_fingerprint, describe_ui_intent, node_guidance,
-    parse_process_spec, render_executable_processes, render_process_recipes, render_recent_ring,
-    render_working_region, self_verify_prompt, verify_status_label,
+    parse_process_spec, render_executable_processes, render_process_recipes, render_recall_supplement,
+    render_recent_ring, render_working_region, self_verify_prompt, verify_status_label,
 };
 use shell_gate::{shell_command_of, shell_gate};
 
@@ -66,7 +66,7 @@ pub async fn agent_loop(
 ) -> AgentOutcome {
     run_agent_loop(
         user_msg, false, None, cfg, llm, registry, sandbox, memory, subconscious, reasoner, flywheel, work_dir,
-        sink, false, false,
+        sink, false, false, true,
     )
     .await
 }
@@ -100,7 +100,7 @@ pub async fn agent_loop_internal(
 ) -> AgentOutcome {
     run_agent_loop(
         seed, true, initial_wf, cfg, llm, registry, sandbox, memory, subconscious, reasoner, flywheel, work_dir, sink,
-        transient, self_drive,
+        transient, self_drive, true,
     )
     .await
 }
@@ -187,6 +187,9 @@ async fn run_agent_loop(
     // ★自驱续跑★:true = 自动鞭策种子。完整种子作本轮系统消息让 AI 看到,但**不把全文 ingest 进时间线**
     // (P3:防几百轮重复种子膨胀 + recent-ring 被鞭策噪音挤占);记录交 run_chat 的精简 SELF_DRIVE 标记。
     self_drive: bool,
+    // ★并行子代理总开关(设计/07-附录-并行子代理)★:true=主链(本轮 ≥2 个 isolated 调查员调用可并发扇出);
+    // false=一次性子运行内(禁并行批,防 fork-bomb / 无限递归)。主入口恒 true,run_investigator 传 false。
+    allow_parallel: bool,
 ) -> AgentOutcome {
     // ① 组装上下文(P4 记忆置换系统,稳定→易变,命中 prompt 缓存):
     //    system prompt(最稳) → 工作记忆区(指针调入,两态) → 8K 最近 ring(最末) → 当前回合。
@@ -328,6 +331,12 @@ async fn run_agent_loop(
     // AI 原样重发同指纹 → 执行前注入"不犯第二遍"提醒(软,不硬阻——尊重 build/test 类工具的关键因素
     // 是外部状态、可能已被其它工具改变)。零 LLM/嵌入开销。
     let mut failed_call_sigs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // ★回合内补检索(用户决策:回合内重跑检索,cfg.recall_in_loop)★:开场 assemble_context 只按进场用户消息
+    // 检索一次;任务跑到一半 AI 才需要的信息(如开始 SSH 才要的凭据)开场未必召回。每轮顶端用"AI 上一轮的
+    // 思路+进展"作新查询再检索,新命中增量注入(append-only、去重、无新命中不打扰)。
+    // recall_query = 下一轮要用的查询(由上一轮产出填);last_recall_query = 上次真检索用过的(相同则跳过,省重复)。
+    let mut recall_query: Option<String> = None;
+    let mut last_recall_query: Option<String> = None;
     while cfg.max_turns == 0 || turn < cfg.max_turns as usize {
         // ★回合级取消检查点(造物交互 v2 §2)★:用户按「终止」→ 本轮优雅收口(不再调 LLM/动手)。
         // 任务未完成,不 finalize(那是完成的学习);已采集的逐步经验保留,只抛 Done 让前端停转。
@@ -358,6 +367,20 @@ async fn run_agent_loop(
         // ★分支门控(栈函数 v2 原则7+9)★:在派生分支(栈调用帧)内 → ① 思考/正文不向用户展示(只主链对话)
         // ② 逐步工具转录不自动写主记忆。wf_stack 本轮内不变,故在调 LLM 前算一次,贯穿展示与记忆门控。
         let in_branch = wf_stack.last().is_some_and(|f| f.is_branch);
+        // ★回合内补检索★:据上一轮的思路/进展(recall_query,由上一轮末尾填)重检索长期记忆,新命中增量注入
+        // (append-only,缓存稳)。仅主链(!in_branch:派生分支已隔离上下文、有自己返回契约,不混入主记忆检索);
+        // 查询非空且与上次真检索不同才跑(省重复)。无新命中 → render 返回 None,不注入、不打扰。
+        if cfg.recall_in_loop && !in_branch {
+            if let Some(q) = recall_query.as_deref() {
+                if last_recall_query.as_deref() != Some(q) {
+                    let fresh = memory.supplement_context(q, subconscious).await;
+                    if let Some(msg) = render_recall_supplement(&fresh, &cfg.prompt_lang) {
+                        messages.push(ChatMessage::system(msg));
+                    }
+                    last_recall_query = Some(q.to_string());
+                }
+            }
+        }
         // ② 调 LLM,带截断重试(token 不足把工具调用截成空参 → 加预算重试)。
         // 0 = 不限制,模型自己停。非零 = 有限额,截断时翻倍重试。
         let has_limit = cfg.max_tokens > 0;
@@ -438,6 +461,18 @@ async fn run_agent_loop(
             final_text = outcome.content.clone();
         }
 
+        // ★回合内补检索·采集下一轮查询★:用本轮 AI 的思路(reasoning 最能表"我此刻要干嘛/缺什么")+ 正文
+        // 作下一轮顶端补检索的查询。取尾部(结论/下一步意图通常落在思考末尾),限长 1000 字保嵌入信号集中。
+        if cfg.recall_in_loop {
+            let combined = format!("{}\n{}", outcome.reasoning, outcome.content);
+            let combined = combined.trim();
+            if !combined.is_empty() {
+                let chars: Vec<char> = combined.chars().collect();
+                let start = chars.len().saturating_sub(1000);
+                recall_query = Some(chars[start..].iter().collect());
+            }
+        }
+
         // ③ 无工具调用:模型只输出了思考/文字,没动手。★思考免死★(用户原则 2026-06-03):
         //    思考阶段物理上调不了工具,"没调工具"不能当卡住。只要在产出新内容就让它继续想/干;
         //    唯一收口条件 = 连续 max_stall 轮产出"近乎全等"(真高频重复死循环)。max_turns 仍是硬底线。
@@ -447,7 +482,7 @@ async fn run_agent_loop(
                 // transient:观察轮的收尾不写主记忆、不跑飞轮 finalize(流式窗口记忆)。
                 if !transient {
                     if !final_text.is_empty() {
-                        memory.ingest_with_role(&final_text, "assistant");
+                        memory.ingest_with_role(strip_emoji(&final_text), "assistant");
                     }
                     finalize(flywheel, memory, reasoner, sink).await;
                 }
@@ -466,7 +501,7 @@ async fn run_agent_loop(
                 crate::notify::perceive_notice(memory, &cfg.prompt_lang, "loop.degenerate", &serde_json::json!({}));
                 sink.emit(AgentEvent::Notice("检测到回答高频重复,已收口".into())).await;
                 if !transient {
-                    memory.ingest_with_role(&final_text, "assistant");
+                    memory.ingest_with_role(strip_emoji(&final_text), "assistant");
                     finalize(flywheel, memory, reasoner, sink).await;
                 }
                 return AgentOutcome { final_text, turns: turn + 1, stopped: StopReason::Completed };
@@ -516,6 +551,20 @@ async fn run_agent_loop(
         // 不变,算一次贯穿整批工具。None = 不在任何节点(主智能体)= 全工具可用。脊柱侧(下方第一关)与唯一
         // 执行闸门(dispatch_with_cancel_scoped)共用同一判据 `tool_in_scope`。
         let node_allowed = wf_stack.last().and_then(|f| registry.node_allowed_tools(&f.wf, &f.node));
+        // ★并行子代理预扫(设计/07-附录-并行子代理)★:本轮 `isolated` 工作流入口调用。≥2 个 + 允许并行(主链)
+        // → 作为并发批跑(各一次性子运行、汇聚摘要回灌),不走单帧栈路径;其余工作流入口/工具照常。
+        let parallel_batch: Vec<(String, EnteredWf)> = if allow_parallel {
+            outcome
+                .tool_calls
+                .iter()
+                .filter_map(|c| parse_wf_entry(c, registry).filter(|e| e.isolated).map(|e| (c.id.clone(), e)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let do_parallel = parallel_batch.len() >= 2;
+        let batch_ids: HashSet<String> =
+            if do_parallel { parallel_batch.iter().map(|(id, _)| id.clone()).collect() } else { HashSet::new() };
         for call in &outcome.tool_calls {
             // ★终止穿透到工具批次★:本轮可能有多个 tool_call,用户中途按「终止」→ 不再继续派发剩余工具,
             // 立刻收口(配合 shell 执行器内部的取消自杀:正在跑的那条命令也已被杀)。任务未完成,不 finalize。
@@ -581,6 +630,11 @@ async fn run_agent_loop(
             // 复用唯一工具调用路径,零新机制(07 原则2/3)。从调用参数解析"函数调用签名"
             // (input/return_spec/context_mode/direct),收尾时据此压栈(栈调用)或替换帧(直接调用)。
             if let Some(wf) = registry.workflow(&call.name) {
+                // ★并行批成员★:本调用是本轮 isolated 调查员并发批的一员 → 跳过单帧 push 与即时 ack,
+                // 由循环末尾的并行批跑完后把摘要回灌为它的 tool_result(见下方"并行子代理批")。
+                if do_parallel && batch_ids.contains(&call.id) {
+                    continue;
+                }
                 let entry = wf.entry.clone();
                 let sig: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
                 let pick = |k: &str| sig.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(String::from);
@@ -922,14 +976,14 @@ async fn run_agent_loop(
             // 用户在聊天里正常回答即驱动下一轮(前端无需特殊处理,问题走 Content 显示)。
             if let Dispatch::AwaitingUser(r) = dispatch {
                 let question = if r.content.trim().is_empty() { "(需要你的回复)".to_string() } else { r.content.clone() };
-                sink.emit(AgentEvent::Content(question.clone())).await;
+                sink.emit(AgentEvent::Content(strip_emoji(&question))).await;
                 sink.emit(AgentEvent::ToolEnd {
                     name: call.name.clone(),
                     ok: true,
                     content: "已向用户提问,本轮在此暂停等待回答".into(),
                 })
                 .await;
-                memory.ingest_with_role(&question, "assistant");
+                memory.ingest_with_role(strip_emoji(&question), "assistant");
                 final_text = question;
                 yielded = Some("ask_user".into());
                 break;
@@ -1030,6 +1084,29 @@ async fn run_agent_loop(
                 edited_rs.push(p);
             }
             messages.push(ChatMessage::tool_result(call.id.clone(), result.content));
+        }
+
+        // ★并行子代理批(设计/07-附录-并行子代理)★:本轮 ≥2 个 isolated 调查员调用 → 并发跑一次性子运行、
+        // 汇聚摘要按 tool_calls 原序回灌为各自 tool_result(保 tool_call/result 配对,防 400)。已收口/让位则不跑。
+        if do_parallel && finished.is_none() && yielded.is_none() {
+            let n = parallel_batch.len();
+            sink.emit(AgentEvent::Notice(format!("{n} 个调查员并发勘探中…"))).await;
+            let results = run_parallel_investigators(
+                &parallel_batch, cfg, llm, registry, sandbox, work_dir, sink.cancel_flag(),
+            )
+            .await;
+            for call in &outcome.tool_calls {
+                if let Some(pos) = results.iter().position(|(id, _, _)| id == &call.id) {
+                    let (id, wf, digest_raw) = &results[pos];
+                    let digest = strip_emoji(digest_raw); // 调查员结论也去 emoji(铁律5)
+                    sink.emit(AgentEvent::ToolEnd { name: wf.clone(), ok: true, content: digest.clone() }).await;
+                    if !in_branch {
+                        memory.ingest_with_role(format!("investigate({wf}) -> {digest}"), "tool");
+                    }
+                    messages.push(ChatMessage::tool_result(id.clone(), format!("[调查员「{wf}」返回]\n{digest}")));
+                }
+            }
+            sink.emit(AgentEvent::Notice(format!("调查员已返回 {n} 份结论"))).await;
         }
 
         // ★A2 诊断推感知层★:本轮编辑过 .rs 且未收口/让位 → 若该工作区 rust-analyzer 已在跑
@@ -1194,7 +1271,7 @@ async fn run_agent_loop(
             final_text = summary;
             // transient(终端共驾观察轮):finish 收尾也不写主记忆/不跑飞轮(流式窗口记忆)。
             if !transient {
-                memory.ingest_with_role(&final_text, "assistant");
+                memory.ingest_with_role(strip_emoji(&final_text), "assistant");
                 finalize(flywheel, memory, reasoner, sink).await;
             }
             return AgentOutcome { final_text, turns: turn + 1, stopped: StopReason::Completed };
@@ -1231,7 +1308,7 @@ async fn run_agent_loop(
 /// 中途轮从不落库 → 不会重复)。transient(终端共驾观察轮)按设计不落主记忆;空文本不落。
 fn persist_visible_reply(memory: &mut Memory, text: &str, transient: bool) {
     if !transient && !text.is_empty() {
-        memory.ingest_with_role(text, "assistant");
+        memory.ingest_with_role(strip_emoji(text), "assistant");
     }
 }
 
@@ -1313,4 +1390,223 @@ fn is_internal_state_file_op(name: &str, args: &str, work_dir: &Path) -> bool {
 /// 参数 `_flywheel/_memory/_reasoner` 现已不在前台用(保留签名,免改所有调用点)。
 async fn finalize(_flywheel: &Flywheel, _memory: &mut Memory, _reasoner: &dyn Reasoner, sink: &dyn EventSink) {
     sink.emit(AgentEvent::Done).await;
+}
+
+/// ★去除 Emoji / 表情符号(铁律5,确定性硬过滤,不靠模型自觉)★。只用于**展示给用户**的文本与
+/// **落库的 assistant 正文**;**不**改发回 LLM 的 content/reasoning_content(那要 byte-stable 命中 KV 缓存,
+/// 见 [[deepseek-cache-and-reasoning]])。保留项目用作文本符号的 ★(U+2605)/ 箭头 / 项目符号,只去真表情。
+pub(crate) fn strip_emoji(s: &str) -> String {
+    s.chars()
+        .filter(|&c| {
+            let u = c as u32;
+            // 补充平面象形/表情(unambiguous emoji,含 🕵 📋 等及肤色/旗帜):U+1F000..=U+1FAFF。
+            if (0x1F000..=0x1FAFF).contains(&u) {
+                return false;
+            }
+            // 变体选择符(emoji 表现 VS16 等)+ 零宽连接(ZWJ 组合 emoji)。
+            if (0xFE00..=0xFE0F).contains(&u) || u == 0x200D {
+                return false;
+            }
+            // BMP 常见表情(显式列举,刻意避开项目用作文本符号的 ★(2605)/→/•/✓(2713)):勾/叉/星/警告/感叹问号等。
+            !matches!(
+                u,
+                0x2705 | 0x274C | 0x274E | 0x2714 | 0x2716 | 0x2728 | 0x2757 | 0x2753 | 0x2754
+                    | 0x2755 | 0x26A0 | 0x2B50 | 0x2611 | 0x2B55 | 0x203C | 0x2049
+            )
+        })
+        .collect()
+}
+
+/// ★静默 sink(并行调查员一次性子运行用,见 设计/07-附录-并行子代理)★:吞掉一切展示(分支不与用户对话);
+/// 转发主链取消标志(主线终止 → 调查员秒级收手);决策一律拒(只读调查员无用户在场可批,越界读失败即可)。
+struct MutedSink {
+    cancel: growbox_core::CancelFlag,
+}
+#[async_trait::async_trait]
+impl EventSink for MutedSink {
+    async fn emit(&self, _event: AgentEvent) {} // 静默:调查员过程不展示(只回摘要)。
+    fn is_cancelled(&self) -> bool {
+        self.cancel.as_ref().map(|f| f.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false)
+    }
+    fn cancel_flag(&self) -> growbox_core::CancelFlag {
+        self.cancel.clone() // 穿给调查员内部 dispatch,长命令也随主线终止收手。
+    }
+    async fn request_decision(&self, _kind: crate::decision::DecisionKind) -> crate::decision::Decision {
+        crate::decision::Decision::Deny // 只读调查员:无用户在场可批,一律拒。
+    }
+}
+
+/// 从一个 tool_call 解析"工作流入口函数调用签名"(若 `call.name` 是已注册工作流;见 07 v2 原则3)。
+/// 供并行批预扫用(单帧路径仍内联解析,二者读同样字段、判据一致)。
+fn parse_wf_entry(call: &growbox_core::ToolCall, registry: &Registry) -> Option<EnteredWf> {
+    let wf = registry.workflow(&call.name)?;
+    let sig: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+    let pick = |k: &str| sig.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+    let cmode = sig.get("context_mode").and_then(|v| v.as_str()).unwrap_or("");
+    Some(EnteredWf {
+        wf: wf.name.clone(),
+        entry: wf.entry.clone(),
+        input: pick("input"),
+        return_spec: pick("return_spec"),
+        isolated: cmode.eq_ignore_ascii_case("isolated"),
+        fork: cmode.eq_ignore_ascii_case("fork"),
+        direct: sig.get("direct").and_then(|v| v.as_bool()).unwrap_or(false),
+        max_loops: sig.get("max_loops").and_then(|v| v.as_i64()).unwrap_or(-1),
+    })
+}
+
+/// 一个并行调查员的简报(input + 返回契约)拼成的子运行种子。
+fn investigator_brief(ent: &EnteredWf) -> String {
+    let mut s = ent
+        .input
+        .clone()
+        .unwrap_or_else(|| "(调用方未给具体 input;按本工作流节点引导调查,完成后 finish 给结论)".to_string());
+    if let Some(rs) = &ent.return_spec {
+        s.push_str(&format!("\n\n[完成后调 finish,summary 按此格式给结论]\n{rs}"));
+    }
+    s
+}
+
+/// ★一个并行调查员 = 一次性子运行(设计/07-附录-并行子代理)★:精简自含循环 —— drive_one(静默)→
+/// 只读工具(节点收窄,唯一执行闸门校验)→ finish/workflow_return 收口 → 返回摘要。**隔离** = 全新空上下文
+/// (系统提示 + 节点引导 + 简报,不含父对话/主记忆);**只读** = 节点工具子集;贡献 = 返回值(不碰主记忆)。
+///
+/// ★为什么不复用 run_agent_loop★:脊柱→调查员→脊柱是异步递归,叠加 supervisor `tokio::spawn` 要求 Send +
+/// 大量借用,Rust 无法证明(自指 Send / HRTB "not general enough")。调查员需求本就简单(无栈/记忆/自检/
+/// 工具记忆/UI),自含一条精简循环最稳;它无工作流入口工具 → 物理上发不出 isolated 调用 → 无嵌套并行/fork-bomb。
+#[allow(clippy::too_many_arguments)]
+async fn run_investigator(
+    ent: &EnteredWf,
+    cfg: &AgentConfig,
+    llm: &dyn LlmDriver,
+    registry: &Registry,
+    sandbox: &Sandbox,
+    work_dir: &Path,
+    cancel: growbox_core::CancelFlag,
+) -> String {
+    let muted = MutedSink { cancel };
+    // 入口节点 + 只读工具集(节点收窄)。进不去则如实回报。
+    let Some(node) = registry.workflow(&ent.wf).and_then(|wf| wf.node(&ent.entry).cloned()) else {
+        return format!("(调查员无法进入工作流「{}」入口节点「{}」)", ent.wf, ent.entry);
+    };
+    let allowed = registry.node_allowed_tools(&ent.wf, &ent.entry); // Some(只读子集)
+    let materialized: HashSet<String> = HashSet::new();
+    let turn_tools = registry.tools_for(&cfg.prompt_lang, Some((ent.wf.as_str(), ent.entry.as_str())), &materialized);
+
+    // 隔离上下文:系统提示(含禁 emoji)+ 节点引导 + 简报(无父对话/无主记忆检索)。
+    let mut messages = vec![
+        ChatMessage::system(cfg.system_prompt.clone()),
+        ChatMessage::system(node_guidance(&ent.wf, &node, &cfg.prompt_lang)),
+        ChatMessage::user(investigator_brief(ent)),
+    ];
+    // 调查员限轮(防失控):主设置封顶 24。
+    let cap = if cfg.max_turns == 0 { 24 } else { (cfg.max_turns as usize).min(24) };
+    let mut last = String::new();
+    for _ in 0..cap {
+        if muted.is_cancelled() {
+            return if last.is_empty() { "(调查被终止)".into() } else { last };
+        }
+        let mut req = ChatRequest::new(cfg.model.clone(), messages.clone())
+            .with_tools(turn_tools.clone())
+            .with_reasoning_effort(cfg.reasoning_effort.clone());
+        if cfg.max_tokens > 0 {
+            req = req.with_max_tokens(cfg.max_tokens);
+        }
+        let outcome = match drive_one(llm, req, &muted, cfg.silence_secs, false).await {
+            Ok(o) => o,
+            Err(e) => return format!("(调查员 LLM 调用失败:{e})"),
+        };
+        if !outcome.content.is_empty() {
+            last = outcome.content.clone();
+        }
+        if outcome.tool_calls.is_empty() {
+            return if last.is_empty() { "(调查员未给出结论)".into() } else { last }; // 不催续
+        }
+        messages.push(ChatMessage {
+            role: Role::Assistant,
+            content: outcome.content.clone(),
+            tool_calls: outcome.tool_calls.clone(),
+            tool_call_id: None,
+            reasoning_content: if outcome.reasoning.is_empty() { None } else { Some(outcome.reasoning.clone()) },
+        });
+        for call in &outcome.tool_calls {
+            // finish:summary = 这份调查员的摘要(收口)。
+            if call.name == "finish" {
+                let v: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+                let summary = v.get("summary").and_then(|s| s.as_str()).unwrap_or("").trim();
+                let d = if summary.is_empty() { last.clone() } else { summary.to_string() };
+                return if d.is_empty() { "(调查员已结束,无明确结论)".into() } else { d };
+            }
+            // workflow_return:value 即结论。
+            if call.name == crate::executors::WORKFLOW_RETURN {
+                let v: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+                let value = v.get("value").and_then(|s| s.as_str()).unwrap_or("").trim();
+                if !value.is_empty() {
+                    return value.to_string();
+                }
+                return if last.is_empty() { "(调查员返回空结论)".into() } else { last };
+            }
+            // ask_user:后台只读子代理无用户在场 → 回执提示,据现有信息继续/收口。
+            if call.name == "ask_user" {
+                messages.push(ChatMessage::tool_result(
+                    call.id.clone(),
+                    "调查员是后台只读子代理,无法向用户提问。请据现有信息得出结论并 finish。".to_string(),
+                ));
+                continue;
+            }
+            // 工具可见性闸:节点外工具硬拒(只读子代理写不了、也调不动工作流入口 → 无嵌套并行)。
+            if let Some(a) = allowed.as_ref() {
+                if !Registry::tool_in_scope(&call.name, Some(a)) {
+                    messages.push(ChatMessage::tool_result(
+                        call.id.clone(),
+                        format!("调查员只读,不能调用「{}」(本步只允许只读工具)。", call.name),
+                    ));
+                    continue;
+                }
+            }
+            // 派发只读工具(经唯一执行闸门;无 &mut Memory,故可并发)。
+            let content =
+                match registry.dispatch_with_cancel_scoped(call, sandbox, work_dir, muted.cancel_flag(), allowed.as_ref()).await {
+                    Dispatch::Done(r) => r.content,
+                    Dispatch::Terminal(r) => r.content,
+                    Dispatch::Denied { reason } => format!("操作被拒:{reason}"),
+                    Dispatch::NeedAuth { .. } => "调查员无授权能力(只读),该操作被拒。".to_string(),
+                    Dispatch::AwaitingUser(_) => "调查员不能等待用户输入。".to_string(),
+                    Dispatch::Intent(_) => "调查员不能操作 UI。".to_string(),
+                };
+            messages.push(ChatMessage::tool_result(call.id.clone(), content));
+        }
+    }
+    if last.is_empty() { "(调查员达最大轮数仍无结论)".into() } else { last }
+}
+
+/// ★并发跑一批调查员、汇聚摘要(设计/07-附录-并行子代理)★。单异步任务上 `buffer_unordered(parallel_max)`
+/// 协作并发:多个 LLM 请求同时在飞(I/O 密集),无需线程/Arc/Sync(各持只读借用 + 各自一次性 Memory)。
+/// 返回 `(call_id, 工作流名, 摘要)`;调用方按 tool_calls 原序回灌。
+#[allow(clippy::too_many_arguments)]
+async fn run_parallel_investigators(
+    batch: &[(String, EnteredWf)],
+    cfg: &AgentConfig,
+    llm: &dyn LlmDriver,
+    registry: &Registry,
+    sandbox: &Sandbox,
+    work_dir: &Path,
+    cancel: growbox_core::CancelFlag,
+) -> Vec<(String, String, String)> {
+    use futures::stream::StreamExt;
+    let cap = cfg.parallel_max.max(1);
+    // 显式 `Box<dyn Future + Send>` 钉死每个调查员 future 的 Send + 生命周期 —— 绕开 buffer_unordered + 借用
+    // 在 supervisor `tokio::spawn` 上下文里的 HRTB "Send not general enough"(run_investigator 非递归,无 cycle)。
+    type InvFut<'f> = std::pin::Pin<Box<dyn std::future::Future<Output = (String, String, String)> + Send + 'f>>;
+    let mut futs: Vec<InvFut<'_>> = Vec::with_capacity(batch.len());
+    for (id, ent) in batch {
+        let id = id.clone();
+        let wf = ent.wf.clone();
+        let cancel = cancel.clone();
+        futs.push(Box::pin(async move {
+            let digest = run_investigator(ent, cfg, llm, registry, sandbox, work_dir, cancel).await;
+            (id, wf, digest)
+        }));
+    }
+    futures::stream::iter(futs).buffer_unordered(cap).collect().await
 }

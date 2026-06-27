@@ -606,10 +606,12 @@ export const api = {
     tokenCeil: number;
     silenceSecs: number;
     maxStall: number;
+    parallelMax: number;
     completeSilenceSecs: number;
     reasoningEffort: string;
     selfVerify: boolean;
     selfVerifyMinTools: number;
+    recallInLoop: boolean;
   }): Promise<void> {
     return invoke<void>("set_agent_config", p);
   },
@@ -619,10 +621,12 @@ export const api = {
     token_ceil: number;
     silence_secs: number;
     max_stall: number;
+    parallel_max: number;
     complete_silence_secs: number;
     reasoning_effort: string;
     self_verify: boolean;
     self_verify_min_tools: number;
+    recall_in_loop: boolean;
   }> {
     return invoke("get_agent_config");
   },

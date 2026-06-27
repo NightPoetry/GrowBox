@@ -7,7 +7,7 @@ use growbox_llm::{ChatRequest, StreamChunk, ToolCallAccumulator};
 
 use crate::bridge::LlmDriver;
 
-use super::{AgentEvent, EventSink};
+use super::{strip_emoji, AgentEvent, EventSink};
 
 /// 一次 LLM 调用的归一化结果。
 pub(super) struct DriveOutcome {
@@ -69,15 +69,15 @@ pub(super) async fn drive_one(
         };
         match chunk {
             StreamChunk::Reasoning(r) => {
-                reasoning.push_str(&r);
+                reasoning.push_str(&r); // 累积原文保 byte-stable(回传 KV 缓存,见 deepseek-cache);展示侧去 emoji。
                 if user_visible {
-                    sink.emit(AgentEvent::Reasoning(r)).await; // 分支内不向用户展示思考(只主链)。
+                    sink.emit(AgentEvent::Reasoning(strip_emoji(&r))).await; // 分支内不向用户展示思考(只主链)。
                 }
             }
             StreamChunk::Content(c) => {
-                content.push_str(&c);
+                content.push_str(&c); // 累积原文保 byte-stable(回传 KV 缓存);展示侧去 emoji(铁律5,不靠模型自觉)。
                 if user_visible {
-                    sink.emit(AgentEvent::Content(c)).await; // 分支内不与用户对话。
+                    sink.emit(AgentEvent::Content(strip_emoji(&c))).await; // 分支内不与用户对话。
                 }
             }
             StreamChunk::ToolCallDelta { index, id, name, args_fragment } => {

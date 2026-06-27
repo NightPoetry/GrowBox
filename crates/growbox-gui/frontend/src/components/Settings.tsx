@@ -17,8 +17,8 @@ import {
 } from "../store";
 // 逻辑层(模块级配置信号 + 保存/扫描/连接动作)抽到 settings/state;此处导入面板回显 effect 用到的设值器。
 import {
-  setAgMaxTokenRetries, setAgTokenCeil, setAgSilenceSecs, setAgMaxStall, setAgCompleteSilence, setAgReasoningEffort,
-  setAgSelfVerify, setAgSelfVerifyMin,
+  setAgMaxTokenRetries, setAgTokenCeil, setAgSilenceSecs, setAgMaxStall, setAgParallelMax, setAgCompleteSilence, setAgReasoningEffort,
+  setAgSelfVerify, setAgSelfVerifyMin, setAgRecallInLoop,
   setIdThreshold, setIdTick, setIdFatigue, setIdMaxSleep, setIdMaxRehearsals,
   setMcShellApproval, setMcUiAck, setMcBackoffBase, setMcBackoffCap, mcAutoShutdown, setMcAutoShutdown, setMcCachePrewarm, setMcBranchLogGb,
   setMcLazyTools, setMcDeferredList, loadMcpStatus,
@@ -66,10 +66,12 @@ const Settings: Component = () => {
       setAgTokenCeil(String(c.token_ceil));
       setAgSilenceSecs(String(c.silence_secs));
       setAgMaxStall(String(c.max_stall));
+      setAgParallelMax(String(c.parallel_max ?? 4));
       setAgCompleteSilence(String(c.complete_silence_secs));
       setAgReasoningEffort(c.reasoning_effort === "high" ? "high" : "max");
       setAgSelfVerify(c.self_verify !== false);
       setAgSelfVerifyMin(String(c.self_verify_min_tools ?? 3));
+      setAgRecallInLoop(c.recall_in_loop !== false);
     }).catch(recallFailed);
   });
   // idle/睡眠旋钮:打开设置时回显当前值。

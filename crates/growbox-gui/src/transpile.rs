@@ -132,6 +132,16 @@ const RENDER_WORKING_EN: &str =
      [About this region] Below are history fragments relevant to the current task, recalled from long-term memory.\n\
      This region is NON-LINEAR: a fragment's position does not imply chronological order -- judge the actual sequence strictly\n\
      by each block's \"time\" field, not by where it sits in this region.\n";
+const RENDER_RECALL_ZH: &str =
+    "========== 补充记忆(SUPPLEMENTARY RECALL · 据当前进展新检索调入)==========\n\
+     [本区说明] 任务进行中,系统据你最近的思路/进展又检索了一次长期记忆,下列是**此刻新浮现**、\n\
+     与当前进展相关的历史片段(开场未必给过 —— 例如你刚要动手才需要的某些信息)。\n\
+     同为非线性区:请严格按每块「时间」字段判断先后,勿按它们在本区里的排列位置推断。\n";
+const RENDER_RECALL_EN: &str =
+    "========== SUPPLEMENTARY RECALL (re-retrieved by your current progress) ==========\n\
+     [About this region] Mid-task, the system re-searched long-term memory using your recent reasoning/progress.\n\
+     Below are history fragments that surfaced JUST NOW as relevant to where you are (not necessarily provided at the start --\n\
+     e.g. info you only need now that you are about to act). NON-LINEAR: judge order strictly by each block's \"time\" field.\n";
 const RENDER_RECENT_ZH: &str =
     "########## 最近记忆 · MOST RECENT(紧贴当前回合,按时间正序 旧→新)##########\n\
      [本区说明] 这是最近发生的对话/操作,时间上最贴近当前回合,按时间正序排列。\n";
@@ -177,6 +187,7 @@ pub const CATALOG: &[PromptEntry] = &[
     PromptEntry { key: "subconscious.propose_skill", role: PromptRole::Subconscious, zh: PROPOSE_SKILL_ZH, en: PROPOSE_SKILL_EN },
     PromptEntry { key: "subconscious.chunk_doc", role: PromptRole::Subconscious, zh: CHUNK_DOC_ZH, en: CHUNK_DOC_EN },
     PromptEntry { key: "render.working_header", role: PromptRole::Main, zh: RENDER_WORKING_ZH, en: RENDER_WORKING_EN },
+    PromptEntry { key: "render.recall_header", role: PromptRole::Main, zh: RENDER_RECALL_ZH, en: RENDER_RECALL_EN },
     PromptEntry { key: "render.recent_header", role: PromptRole::Main, zh: RENDER_RECENT_ZH, en: RENDER_RECENT_EN },
     PromptEntry { key: "render.recipes_header", role: PromptRole::Main, zh: RENDER_RECIPES_ZH, en: RENDER_RECIPES_EN },
     PromptEntry { key: "render.executable_header", role: PromptRole::Main, zh: RENDER_EXEC_ZH, en: RENDER_EXEC_EN },

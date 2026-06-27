@@ -421,6 +421,7 @@ async fn run_chat(
         // 思考免死的"近乎全等"判不出 → 不收口),致画布一直刷而聊天早停(用户 2026-06-04 真机惊到)。
         // 造物响应应收敛:更新一次回应交互即可。限 4 轮(render→可能 selftest→finish)。
         max_turns: if artifact.is_some() { st.settings.max_turns.min(4) } else { st.settings.max_turns },
+        parallel_max: st.settings.parallel_max as usize,
         system_prompt: full_prompt,
         prompt_lang: st.settings.lang.clone(),
         auto_mode: st.settings.auto_mode,
@@ -439,6 +440,8 @@ async fn run_chat(
         // ★主动自检★:造物交互回合要秒级响应、不自检(避免多花一轮);普通任务按用户设置。
         self_verify: st.settings.self_verify && artifact.is_none(),
         self_verify_min_tools: st.settings.self_verify_min_tools as usize,
+        // ★回合内补检索★:造物交互回合要秒级响应、不补检索(避免每轮多一次嵌入/检索延迟);普通任务按用户设置。
+        recall_in_loop: st.settings.recall_in_loop && artifact.is_none(),
         // ★工具记忆 + 不犯第二遍★:造物交互回合要秒级响应,不会诊(省一次嵌入);普通任务按用户设置。
         tool_memory_enabled: st.settings.tool_memory_enabled && artifact.is_none(),
         tool_memory_veto_threshold: st.settings.tool_memory_veto_threshold,

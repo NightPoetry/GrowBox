@@ -140,7 +140,7 @@ fn bare_text(text: &str) -> Vec<StreamChunk> {
 }
 
 fn cfg() -> AgentConfig {
-    AgentConfig { model: "m".into(), max_tokens: 8192, max_turns: 8, system_prompt: "你是助手".into(), prompt_lang: "zh".into(), auto_mode: false, danger_mode: false, privacy_dirs: vec![], max_token_retries: 2, token_ceil: 32_768, silence_secs: 90, max_stall: 2, reasoning_effort: "max".into(), branch_log_max_gb: -1.0, self_verify: false, self_verify_min_tools: 3, tool_memory_enabled: false, tool_memory_veto_threshold: 0.85, tool_memory_warn_threshold: 0.80 }
+    AgentConfig { model: "m".into(), max_tokens: 8192, max_turns: 8, parallel_max: 4, system_prompt: "你是助手".into(), prompt_lang: "zh".into(), auto_mode: false, danger_mode: false, privacy_dirs: vec![], max_token_retries: 2, token_ceil: 32_768, silence_secs: 90, max_stall: 2, reasoning_effort: "max".into(), branch_log_max_gb: -1.0, self_verify: false, self_verify_min_tools: 3, recall_in_loop: false, tool_memory_enabled: false, tool_memory_veto_threshold: 0.85, tool_memory_warn_threshold: 0.80 }
 }
 
 /// 定位测试用 rust-analyzer 并设环境变量(让 LspManager 经 env 找到它):env → 仓库 `.tooling/ra`。
@@ -882,6 +882,113 @@ fn degenerate_fingerprint_folds_whitespace() {
     let c = degenerate_fingerprint("想 B", "落子 (5,5)");
     assert_eq!(a, b, "仅空白差异 = 近乎全等");
     assert_ne!(a, c, "内容不同 = 不同指纹");
+}
+
+// ===================== 并行子代理(调查员并发扇出)+ 禁 emoji =====================
+
+#[test]
+fn strip_emoji_removes_emoji_keeps_text_symbols() {
+    // 去 emoji:补充平面(🕵 📋)+ BMP 常见表情(✅)+ 变体选择符(🕵️ 的 VS16)。
+    assert_eq!(strip_emoji("查案🕵️完成✅"), "查案完成");
+    assert_eq!(strip_emoji("报告📋:done"), "报告:done");
+    // 保留项目用作文本符号的 ★(2605)/ →(2192)/ •(2022)/ ✓(2713,非 emoji)/ 中文。
+    assert_eq!(strip_emoji("★先读 → 见 • 项 ✓ 中文"), "★先读 → 见 • 项 ✓ 中文");
+}
+
+/// 请求内容驱动的 mock LLM:并行调查员与主链**共用同一 llm**,并发下回合顺序不定,故不能用回合队列 —— 据
+/// 请求消息内容判定该返回什么(调查员看到自己的 input"目标甲/乙"就 finish 给结论;主链看到两份结论就收口)。
+struct ParallelMock;
+#[async_trait::async_trait]
+impl LlmDriver for ParallelMock {
+    async fn chat_stream(&self, req: ChatRequest) -> LlmResult<mpsc::Receiver<LlmResult<StreamChunk>>> {
+        let joined = req.messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>().join("\n");
+        let chunks = if joined.contains("目标甲") {
+            answer_then_finish("ADONE") // 调查员甲:只读勘探完,finish 给结论
+        } else if joined.contains("目标乙") {
+            answer_then_finish("BDONE") // 调查员乙
+        } else if joined.contains("ADONE") && joined.contains("BDONE") {
+            answer_then_finish("汇总完成") // 主链:两份摘要都回灌到了 → 收口
+        } else {
+            // 主链第一轮:同一回合发出两个 isolated investigate 调用 → 触发并发批。
+            vec![
+                StreamChunk::ToolCallDelta {
+                    index: 0,
+                    id: Some("inv1".into()),
+                    name: Some("investigate".into()),
+                    args_fragment: r#"{"input":"目标甲","context_mode":"isolated"}"#.into(),
+                },
+                StreamChunk::ToolCallDelta {
+                    index: 1,
+                    id: Some("inv2".into()),
+                    name: Some("investigate".into()),
+                    args_fragment: r#"{"input":"目标乙","context_mode":"isolated"}"#.into(),
+                },
+                StreamChunk::Done { finish_reason: "tool_calls".into() },
+            ]
+        };
+        let (tx, rx) = mpsc::channel(16);
+        tokio::spawn(async move {
+            for c in chunks {
+                if tx.send(Ok(c)).await.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(rx)
+    }
+}
+
+/// ★并行子代理:一回合 2 个 isolated 调查员 → 并发跑、两份摘要都回灌 → 主链收口(设计/07-附录-并行子代理)★。
+#[tokio::test]
+async fn parallel_investigators_run_and_aggregate() {
+    let dir = tempdir().unwrap();
+    let reg = Registry::with_builtins(TaskManager::new());
+    let sb = Sandbox::new(vec![dir.path().to_path_buf()], vec![]);
+    let mut mem = Memory::new();
+    let fw = Flywheel::new();
+    let sink = Collector::default();
+    let out = agent_loop(
+        "并行查两处", &cfg(), &ParallelMock, &reg, &sb, &mut mem, &LocalSub, &NullReasoner, &fw, dir.path(), &sink,
+    )
+    .await;
+
+    assert_eq!(out.stopped, StopReason::Completed);
+    assert_eq!(out.final_text, "汇总完成", "主链应在两份调查摘要回灌后收口");
+    // 两个调查员都跑了、都回了摘要(并行批为每个 investigate 调用 emit 一条 ToolEnd)。
+    let ends: Vec<String> = sink
+        .kinds()
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::ToolEnd { name, content, .. } if name == "investigate" => Some(content.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(ends.iter().any(|c| c == "ADONE"), "调查员甲应回摘要 ADONE: {ends:?}");
+    assert!(ends.iter().any(|c| c == "BDONE"), "调查员乙应回摘要 BDONE: {ends:?}");
+    // 并发批通知出现(用户可见的聚合状态,而非 N 路刷屏)。
+    assert!(
+        sink.kinds().iter().any(|e| matches!(e, AgentEvent::Notice(n) if n.contains("并发勘探"))),
+        "应有并发勘探通知"
+    );
+}
+
+/// ★parallel_max=1 退化为顺序、结果不丢★:并发上限设 1 时,两个调查员仍都跑完、两份摘要都回灌。
+#[tokio::test]
+async fn parallel_max_one_degrades_to_sequential_without_loss() {
+    let dir = tempdir().unwrap();
+    let reg = Registry::with_builtins(TaskManager::new());
+    let sb = Sandbox::new(vec![dir.path().to_path_buf()], vec![]);
+    let mut mem = Memory::new();
+    let fw = Flywheel::new();
+    let sink = Collector::default();
+    let mut c = cfg();
+    c.parallel_max = 1; // 顺序跑,但两份都要回来
+    let out = agent_loop(
+        "并行查两处", &c, &ParallelMock, &reg, &sb, &mut mem, &LocalSub, &NullReasoner, &fw, dir.path(), &sink,
+    )
+    .await;
+    assert_eq!(out.stopped, StopReason::Completed);
+    assert_eq!(out.final_text, "汇总完成", "上限=1 也应在两份摘要回灌后收口(结果不丢)");
 }
 
 // ===================== 活的 IDE:ui_control 往返测试 =====================

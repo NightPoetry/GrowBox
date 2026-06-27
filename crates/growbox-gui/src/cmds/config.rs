@@ -151,22 +151,27 @@ pub async fn set_agent_config(
     token_ceil: u32,
     silence_secs: u32,
     max_stall: u32,
+    parallel_max: u32,
     complete_silence_secs: u32,
     reasoning_effort: String,
     self_verify: bool,
     self_verify_min_tools: u32,
+    recall_in_loop: bool,
 ) -> Result<(), String> {
     let mut st = state.lock().await;
     st.settings.agent_max_token_retries = max_token_retries;
     st.settings.agent_token_ceil = token_ceil;
     st.settings.agent_silence_secs = silence_secs;
     st.settings.agent_max_stall = max_stall;
+    st.settings.parallel_max = parallel_max.max(1); // 至少 1(0 会让并发批永不前进)
     st.settings.complete_silence_secs = complete_silence_secs;
     // 思考强度:只认 high/max,其它(含空串)回退 high(默认,deepseek 官方默认)。
     st.settings.reasoning_effort = if reasoning_effort == "max" { "max".into() } else { "high".into() };
     // ★主动自检★开关 + 触发阈值(下回合对话即用新值;阈值 ≥1)。
     st.settings.self_verify = self_verify;
     st.settings.self_verify_min_tools = self_verify_min_tools.max(1);
+    // ★回合内补检索★开关(下回合对话即用新值;AgentConfig 每回合从 settings 重建)。
+    st.settings.recall_in_loop = recall_in_loop;
     st.save_settings();
     Ok(())
 }
@@ -180,10 +185,12 @@ pub async fn get_agent_config(state: State<'_, SharedState>) -> Result<Value, St
         "token_ceil": s.agent_token_ceil,
         "silence_secs": s.agent_silence_secs,
         "max_stall": s.agent_max_stall,
+        "parallel_max": s.parallel_max,
         "complete_silence_secs": s.complete_silence_secs,
         "reasoning_effort": s.reasoning_effort,
         "self_verify": s.self_verify,
         "self_verify_min_tools": s.self_verify_min_tools,
+        "recall_in_loop": s.recall_in_loop,
     }))
 }
 

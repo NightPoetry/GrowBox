@@ -115,6 +115,7 @@ async fn supervisor_loop(
                     model: st.settings.model.clone(),
                     max_tokens: st.settings.max_tokens,
                     max_turns: st.settings.max_turns.min(4), // Supervisor 回合限制轮数,防失控。
+                    parallel_max: st.settings.parallel_max as usize,
                     system_prompt: full_prompt,
                     prompt_lang: st.settings.lang.clone(),
                     auto_mode: st.settings.auto_mode,
@@ -128,6 +129,7 @@ async fn supervisor_loop(
                     branch_log_max_gb: st.settings.branch_log_max_gb,
                     self_verify: false, // Supervisor 后台回合:不自检(省 token,且非用户面结论)
                     self_verify_min_tools: st.settings.self_verify_min_tools as usize,
+                    recall_in_loop: st.settings.recall_in_loop, // 后台回合也按用户设置补检索(轮数已限 4,成本有界)
                     // 工具记忆:后台 Supervisor 回合也按用户设置会诊(同样别犯第二遍)。
                     tool_memory_enabled: st.settings.tool_memory_enabled,
                     tool_memory_veto_threshold: st.settings.tool_memory_veto_threshold,

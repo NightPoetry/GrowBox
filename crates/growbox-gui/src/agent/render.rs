@@ -24,6 +24,26 @@ pub(super) fn render_working_region(blocks: &[ContextBlock], prompt_lang: &str) 
     Some(s)
 }
 
+/// ★回合内补检索渲染(P4 增量)★:任务进行到一半,据 AI 当下进展重新检索、**新**调入的长期记忆片段。
+/// 与工作记忆区同为非线性区(按时间戳判序),但单独成块、明示"因当前进展补充检索"——让 AI 明白这是循环中途
+/// 才浮现的相关记忆(如开始 SSH 才被想起的凭据),非开场就给的。空(无新命中)则不注入,不打扰。append-only。
+pub(super) fn render_recall_supplement(blocks: &[ContextBlock], prompt_lang: &str) -> Option<String> {
+    if blocks.is_empty() {
+        return None;
+    }
+    let mut s = crate::transpile::catalog("render.recall_header", prompt_lang);
+    for b in blocks {
+        s.push_str(&format!(
+            "\n--- [时间 {} | 角色 {}] ---\n{}\n",
+            b.timestamp.to_rfc3339(),
+            b.role,
+            b.content
+        ));
+    }
+    s.push_str("\n========== 补充记忆区结束 ==========");
+    Some(s)
+}
+
 /// 渲染 8K 最近记忆 ring(P4):永远放最末、紧贴当前回合,着重特殊标记"这是最近记忆"。
 /// 时间正序(旧→新);有意不为 prompt 缓存优化(只损这一小块)。
 pub(super) fn render_recent_ring(blocks: &[ContextBlock], prompt_lang: &str) -> Option<String> {

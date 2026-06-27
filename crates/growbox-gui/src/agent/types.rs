@@ -84,6 +84,9 @@ pub struct AgentConfig {
     pub max_tokens: u32,
     /// 循环最大轮数;0 = 无限(长任务不被硬墙截断,见 Settings.max_turns)。
     pub max_turns: u32,
+    /// ★并行子代理并发上限★:一回合发出多个 `context_mode=isolated` 调查员调用时,最多几个同时在飞
+    /// (其余排队跑完)。默认 4;1 = 退化为顺序、结果不丢。见 `设计/07-附录-并行子代理`。
+    pub parallel_max: usize,
     pub system_prompt: String,
     /// 提示词语言(zh/en):决定发给 LLM 的工具 schema description 取哪种文案(与界面语言解耦)。
     pub prompt_lang: String,
@@ -112,6 +115,11 @@ pub struct AgentConfig {
     pub self_verify: bool,
     /// 自检触发阈值:本次任务工具调用数 ≥ 此值才自检(轻任务不花钱)。
     pub self_verify_min_tools: usize,
+    /// ★回合内补检索(用户决策:回合内重跑检索)★:开场 `assemble_context` 只按进场用户消息检索一次;
+    /// 任务跑到一半 AI 才需要的信息(如开始 SSH 才要的凭据)开场未必召回。开 = 每轮顶端用"AI 上一轮的
+    /// 思路+进展"作新查询再检索(复用 RAG→精确两层),新命中增量注入(append-only、去重、无新命中不打扰)。
+    /// 仅主链(非派生分支)生效。默认开;关 = 行为同今天(只开场检索一次)。
+    pub recall_in_loop: bool,
     /// ★工具记忆 + 不犯第二遍(计划/工具记忆-不犯第二遍)★ 总开关:开 = 分发前会诊「小本本」+
     /// 本回合失败指纹守卫。关 = 全不做(行为同今天)。
     pub tool_memory_enabled: bool,

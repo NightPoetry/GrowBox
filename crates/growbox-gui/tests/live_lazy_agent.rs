@@ -46,6 +46,7 @@ fn cfg() -> AgentConfig {
         model: "deepseek-v4-flash".into(),
         max_tokens: 8192,
         max_turns: 10,
+        parallel_max: 4,
         system_prompt: "你是 GrowBox 编码助手,工作在项目沙箱内。优先用工具动手,别只动嘴。\
             注意:部分工具未直接加载(系统会列出'可用但未加载的工具'名单),需要用它们时先调 tool_search 拉回用法再调用。"
             .into(),
@@ -61,6 +62,7 @@ fn cfg() -> AgentConfig {
         branch_log_max_gb: -1.0,
         self_verify: false,
         self_verify_min_tools: 3,
+        recall_in_loop: false,
         tool_memory_enabled: false,
         tool_memory_veto_threshold: 0.85,
         tool_memory_warn_threshold: 0.80,

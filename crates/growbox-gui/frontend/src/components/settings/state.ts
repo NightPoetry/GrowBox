@@ -26,11 +26,14 @@ export const [agMaxTokenRetries, setAgMaxTokenRetries] = createSignal("");
 export const [agTokenCeil, setAgTokenCeil] = createSignal("");
 export const [agSilenceSecs, setAgSilenceSecs] = createSignal("");
 export const [agMaxStall, setAgMaxStall] = createSignal("");
+export const [agParallelMax, setAgParallelMax] = createSignal(""); // 并行调查员并发上限(空=保持当前;默认 4)
 export const [agCompleteSilence, setAgCompleteSilence] = createSignal("");
 export const [agReasoningEffort, setAgReasoningEffort] = createSignal("high");
 // ★主动自检★开关 + 触发阈值(本次任务工具调用数 ≥ 阈值才自检)。
 export const [agSelfVerify, setAgSelfVerify] = createSignal(true);
 export const [agSelfVerifyMin, setAgSelfVerifyMin] = createSignal("");
+// ★回合内补检索★:任务进行中每轮据 AI 当下进展再检索一次长期记忆,新命中增量注入(开场只按进场消息检索一次)。
+export const [agRecallInLoop, setAgRecallInLoop] = createSignal(true);
 
 // ★提示词自转译(自我负责-输入侧)★:开关 + 覆盖条数 + 重写进度。
 // 开关即时落库;「用当前模型重写提示词」是长任务(每条一次重写+一次复核 LLM 调用),进度走事件。
@@ -161,10 +164,12 @@ export function saveAgentConfig(): void {
     tokenCeil: n(agTokenCeil(), 32768),
     silenceSecs: n(agSilenceSecs(), 90),
     maxStall: n(agMaxStall(), 2),
+    parallelMax: Math.max(1, n(agParallelMax(), 4)),
     completeSilenceSecs: n(agCompleteSilence(), 60),
     reasoningEffort: agReasoningEffort() === "high" ? "high" : "max",
     selfVerify: agSelfVerify(),
     selfVerifyMinTools: Math.max(1, n(agSelfVerifyMin(), 3)),
+    recallInLoop: agRecallInLoop(),
   });
 }
 

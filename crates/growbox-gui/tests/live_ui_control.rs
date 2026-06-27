@@ -80,6 +80,7 @@ async fn live_ui_control_closes_panel_end_to_end() {
         model: "deepseek-v4-flash".into(),
         max_tokens: 8192,
         max_turns: 6,
+        parallel_max: 4,
         system_prompt: "你是 GrowBox 助手。你能用 ui_control 直接操控界面面板的可见性\
             (target=面板标识,op=open/close/toggle),用户想开/关/切某面板时直接代劳。\
             做完用一句中文告诉用户。".into(),
@@ -95,6 +96,7 @@ async fn live_ui_control_closes_panel_end_to_end() {
         branch_log_max_gb: -1.0,
         self_verify: false,
         self_verify_min_tools: 3,
+        recall_in_loop: false,
         tool_memory_enabled: false,
         tool_memory_veto_threshold: 0.85,
         tool_memory_warn_threshold: 0.80,

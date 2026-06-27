@@ -9,9 +9,10 @@ import {
 import { t } from "../../i18n";
 import {
   agMaxTokenRetries, setAgMaxTokenRetries, agTokenCeil, setAgTokenCeil,
-  agSilenceSecs, setAgSilenceSecs, agMaxStall, setAgMaxStall,
+  agSilenceSecs, setAgSilenceSecs, agMaxStall, setAgMaxStall, agParallelMax, setAgParallelMax,
   agCompleteSilence, setAgCompleteSilence, agReasoningEffort, setAgReasoningEffort, saveAgentConfig,
   agSelfVerify, setAgSelfVerify, agSelfVerifyMin, setAgSelfVerifyMin,
+  agRecallInLoop, setAgRecallInLoop,
   tpCount, tpBusy, tpProgress, tpResult, tpError, runTranspile,
   tpConcurrency, setTpConcurrency, saveTranspileConcurrency,
   tpSnapshots, tpActive, activateSnapshot, renameSnapshot, deleteSnapshot,
@@ -180,6 +181,15 @@ const AgentTab: Component = () => (
                     {t("agentMaxStallHint") || "思考免死:只有连续多少轮产出近乎全等(真高频重复死循环)才收口。默认 2。"}
                   </p>
                   <div class="settings-field">
+                    <label>{t("agentParallelMaxLabel") || "并行调查员上限"}</label>
+                    <input type="number" min="1" step="1" placeholder="4" value={agParallelMax()}
+                      onInput={(e) => setAgParallelMax(e.currentTarget.value)} onChange={saveAgentConfig}
+                      style={{ flex: 1, "min-width": 0 }} />
+                  </div>
+                  <p style={{ "font-size": "10px", color: "var(--text-secondary)", margin: "0 0 8px 0", "line-height": "1.5" }}>
+                    {t("agentParallelMaxHint") || "一回合发出多个 isolated 调查员调用时,最多几个同时跑(其余排队跑完)。默认 4;1=顺序。"}
+                  </p>
+                  <div class="settings-field">
                     <label>{t("agentMaxRetriesLabel") || "截断重试次数"}</label>
                     <input type="number" min="0" step="1" placeholder="2" value={agMaxTokenRetries()}
                       onInput={(e) => setAgMaxTokenRetries(e.currentTarget.value)} onChange={saveAgentConfig}
@@ -194,6 +204,27 @@ const AgentTab: Component = () => (
                   <p style={{ "font-size": "10px", color: "var(--text-secondary)", margin: "0", "line-height": "1.5" }}>
                     {t("agentRetriesHint") || "工具调用被 token 截断时,翻倍 token 重试的次数与上限。默认 2 次 / 32768。"}
                   </p>
+                </div>
+
+                {/* ★回合内补检索(用户决策:回合内重跑检索)★:开场只按进场用户消息检索一次;任务跑到一半才需要的记忆(如开始 SSH 才要的凭据),每轮据 AI 当下进展再检索一次,新命中增量注入。 */}
+                <div class="settings-section">
+                  <h3>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style={{ "vertical-align": "-2px", "margin-right": "6px" }}>
+                      <circle cx="11" cy="11" r="7" />
+                      <path d="M21 21l-4.3-4.3" />
+                    </svg>
+                    {t("recallInLoopLabel") || "回合内补检索"}
+                  </h3>
+                  <div class="tool-toggle">
+                    <div class="tool-toggle-info">
+                      <div class="tool-toggle-desc">{t("recallInLoopDesc") || "任务进行中,每轮用 AI 当下的思路/进展再检索一次长期记忆,把新浮现的相关记忆增量补进上下文(开场只按进场那句话检索一次 —— 跑到一半才需要的信息,如开始 SSH 才要的用户名/密码,开场未必召回)。仅主链生效、去重不打扰;关掉省一点检索开销。"}</div>
+                    </div>
+                    <label class="toggle-switch">
+                      <input type="checkbox" checked={agRecallInLoop()}
+                        onChange={(e) => { setAgRecallInLoop(e.currentTarget.checked); saveAgentConfig(); }} />
+                      <span class="toggle-track" />
+                    </label>
+                  </div>
                 </div>
 
                 {/* ★自我负责(设计/08)★:输出侧=主动自检(收尾前重读文件核对) + 输入侧=提示词自转译(用当前模型按自己风格重写提示词)。两者同源、都增成本,故都做成开关。 */}

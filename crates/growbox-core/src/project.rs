@@ -50,6 +50,10 @@ pub struct Settings {
     /// 默认 1000(长任务够用);0 = 无限模式,只靠"无工具调用即完成"与空转/错误自然收口。
     #[serde(default = "default_max_turns")]
     pub max_turns: u32,
+    /// 并行子代理(调查员)并发上限:一回合发出多个 isolated 调查员调用时,最多几个同时在飞(其余排队跑完)。
+    /// 默认 4(控成本/速率限制);1 = 退化为顺序、结果不丢。见 `设计/07-附录-并行子代理`。
+    #[serde(default = "default_parallel_max")]
+    pub parallel_max: u32,
     /// 提示词语言。
     #[serde(default = "default_lang")]
     pub lang: String,
@@ -283,6 +287,12 @@ pub struct Settings {
     /// 自检触发阈值:本次任务工具调用数 ≥ 此值才触发自检(轻任务/纯问答不花这个钱)。默认 3,可设。
     #[serde(default = "default_self_verify_min_tools")]
     pub self_verify_min_tools: u32,
+    /// ★回合内补检索(用户决策:回合内重跑检索)★:开场 `assemble_context` 只按进场那一句用户消息检索一次;
+    /// 任务跑到一半 AI 才需要的信息(如开始 SSH 才要的用户名/密码)开场未必召回。开 = 每轮顶端用 AI 当下的
+    /// 思路/进展作新查询再检索一次长期记忆(复用 RAG→精确两层),新命中增量注入(仅主链、append-only 不破缓存、
+    /// 去重、无新命中不打扰)。默认开;关 = 只开场检索一次(行为同今天)。
+    #[serde(default = "default_true")]
+    pub recall_in_loop: bool,
     /// ★提示词自转译(自我负责-输入侧,设计/08 推论2)★:用"消费该提示词的那个模型"把喂给模型的提示词
     /// (系统提示/工具说明/脚手架/judge·distill)按它自己的风格重写一遍(decoder 自亲和,模型最能执行自己写的话)。
     /// 默认关——开了才让运行时优先用转译覆盖层;覆盖产物由「重写提示词」动作生成、按(模型,语言,键)分桶持久,
@@ -595,6 +605,9 @@ fn default_max_tokens() -> u32 {
 fn default_max_turns() -> u32 {
     1000 // 长任务够用;0 = 无限
 }
+fn default_parallel_max() -> u32 {
+    4 // 并行调查员并发上限;1 = 顺序
+}
 fn default_lang() -> String {
     "zh".to_string()
 }
@@ -610,6 +623,7 @@ impl Default for Settings {
             model: "deepseek-v4-flash".to_string(),
             max_tokens: default_max_tokens(),
             max_turns: default_max_turns(),
+            parallel_max: default_parallel_max(),
             lang: default_lang(),
             subconscious_model: String::new(),
             subconscious_api_base: String::new(),
@@ -683,6 +697,7 @@ impl Default for Settings {
             mcp_servers: Vec::new(),
             self_verify: true,
             self_verify_min_tools: default_self_verify_min_tools(),
+            recall_in_loop: true,
             prompt_transpile: false,
             transpile_concurrency: default_transpile_concurrency(),
             skill_enabled: true,

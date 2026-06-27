@@ -90,6 +90,27 @@ async fn exact_hit_pages_in_as_real_pointer() {
     assert_eq!(m.context_fake_pointers(), 0, "Exact 路径不产假指针");
 }
 
+/// ★回合内补检索 supplement_context(用户决策:回合内重跑检索)★:首次把命中调入工作区并作"真新块"返回;
+/// 同查询再调 → 命中已常驻 → 去重,返回空(仅刷新热度,不重复拼)。这是 append-only 增量注入的核心不变式:
+/// 只有"本轮真新调入"的记忆才回给调用方渲染成补充段,已在上下文里的不打扰。
+#[tokio::test]
+async fn supplement_context_returns_only_freshly_paged_in() {
+    let sub = MockSub { keyword: "Rust".into(), judge_calls: Arc::new(AtomicUsize::new(0)) };
+    let mut m = Memory::new();
+    m.ingest_conversation("Rust 是系统语言");
+    m.ensure_embeddings(&sub).await;
+
+    // 首次:节点未常驻 → 调入 + 作新块返回。
+    let first = m.supplement_context("Rust", &sub).await;
+    assert_eq!(first.len(), 1, "首次补检索应返回 1 条真新调入的块");
+    assert!(first[0].content.contains("Rust"), "返回的应是命中的原文");
+    assert!(m.context_fake_pointers() + m.context_real_pointers() >= 1, "命中已调入工作区");
+
+    // 再次同查询:命中已常驻 → 去重,返回空(append-only 不重复拼,无新命中不打扰)。
+    let again = m.supplement_context("Rust", &sub).await;
+    assert!(again.is_empty(), "已常驻的命中不应被重复返回(append-only 去重)");
+}
+
 /// 二期 process kind 建议档:`ingest_process` 写入 role=process,`retrieve_processes` 只召回 process 那条。
 #[tokio::test]
 async fn retrieve_processes_filters_to_process_kind() {

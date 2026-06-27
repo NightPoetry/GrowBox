@@ -247,7 +247,7 @@ fn scan_artifact_workflows(work_dir: &std::path::Path) -> Vec<Workflow> {
 /// ① **造物创建工作流**——强制顺序的典范(先想清结构再创建,再核对收尾)。
 /// ② **命令安全审查工作流**(栈函数 v2 旗舰示范,用户原例)——执行命令前的可复用"子函数"。
 fn builtin_global_workflows() -> Vec<Workflow> {
-    vec![command_safety_workflow(), financial_action_gate_workflow(), Workflow {
+    vec![command_safety_workflow(), financial_action_gate_workflow(), investigate_workflow(), Workflow {
         name: "create_artifact_workflow".into(),
         description: "造物创建工作流:需要新建一个可交互的造物(UI/小工具/小游戏)时调用,\
                       按既定步骤(先想清结构与交互、再一次性创建、最后核对收尾)完成,避免边想边反复重画。"
@@ -374,6 +374,34 @@ fn financial_action_gate_workflow() -> Workflow {
             // 空 tools:只剩恒可用的 ask_user/workflow_return(WF_ALWAYS_AVAILABLE)→ 结构性无提交能力。
             tools: vec![],
             next: vec![],
+        }],
+    }
+}
+
+/// ★并行调查员工作流(只读子代理)★。给临时勘探一个可调对象(见 `设计/07-附录-并行子代理`):
+/// 把要查什么放进 `input`、`context_mode=isolated`;要并行就在同一回合调它多次(各喂不同 input)——
+/// 脊柱把它们作为一次性子运行**并发**跑、各自只读勘探、各回一份摘要。
+/// ★结构性安全(推论1)★:probe 节点只有只读工具(file_read/file_list/code_search)——子代理写不了、
+/// 改不了、也派不出下一层(无工作流入口工具 → 无嵌套并行/fork-bomb)。
+fn investigate_workflow() -> Workflow {
+    Workflow {
+        name: "investigate".into(),
+        description: "并行调查员(只读子函数):把一块自洽的调查/勘探任务交给只读子代理。把要查什么放进 input、\
+                      context_mode=isolated;要并行就在同一回合调它多次(各喂不同 input),它们会并发跑、各自只读勘探、\
+                      各回一份摘要给你。它只读(file_read/file_list/code_search),写不了任何东西、也派不出别的子代理。"
+            .into(),
+        scope: WorkflowScope::Global,
+        entry: "probe".into(),
+        canvas: None,
+        triggers: vec![],
+        nodes: vec![Node {
+            id: "probe".into(),
+            prompt: "调查员·勘探(只读)。调用方把要调查的目标放在了 input 里。用只读工具(file_read/file_list/code_search)\
+                     查清它,然后调 finish,summary = 你的结论(按 return_spec 的格式;只回最少充分信息——关键发现/结论,\
+                     别把读到的全量原文搬回去)。你是只读子代理:写不了、改不了、也派不出别的子代理;查清就 finish 交回结论。"
+                .into(),
+            tools: vec!["file_read".into(), "file_list".into(), "code_search".into()],
+            next: vec![], // 单节点:查清即 finish 退出(finish 恒可用,见 WF_ALWAYS_AVAILABLE)。
         }],
     }
 }

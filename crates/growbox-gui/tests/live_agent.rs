@@ -60,6 +60,7 @@ async fn live_agent_creates_file_end_to_end() {
         model: "deepseek-v4-flash".into(),
         max_tokens: 8192,
         max_turns: 8,
+        parallel_max: 4,
         system_prompt: "你是 GrowBox 助手,工作在项目沙箱内。你有工具:file_write/file_read/file_list/shell。\
             能动手就动手,别只动嘴;改文件前先看清现状。完成后用一句中文告诉用户结果。"
             .into(),
@@ -75,6 +76,7 @@ async fn live_agent_creates_file_end_to_end() {
         branch_log_max_gb: -1.0,
         self_verify: false,
         self_verify_min_tools: 3,
+        recall_in_loop: false,
         tool_memory_enabled: false,
         tool_memory_veto_threshold: 0.85,
         tool_memory_warn_threshold: 0.80,
