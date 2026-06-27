@@ -410,6 +410,219 @@ async fn advance_workflow_stack(
     }
 }
 
+/// 控制信号处理(从 `run_agent_loop` 抽出,零行为变更)。这些"工具"不走 dispatch/安全门——它们只动
+/// 脊柱内部的 memory/wf_stack/上下文(`Executor` trait 只给 &mut ExecCtx,拿不到),故内联成一条收拢的
+/// chokepoint。返回 `true` = 已处理本步(调用方 `continue`,跳过真实 dispatch);`false` = 不是控制信号。
+/// 安全性:这些信号全是 Risk::Safe(只动 memory/栈/上下文,从不碰文件/shell/网络),真能力依旧走唯一安全门。
+#[allow(clippy::too_many_arguments)]
+async fn handle_control_signal(
+    call: &growbox_core::ToolCall,
+    registry: &Registry,
+    cfg: &AgentConfig,
+    sink: &dyn EventSink,
+    memory: &mut Memory,
+    subconscious: &dyn Subconscious,
+    messages: &mut Vec<ChatMessage>,
+    called_tools: &mut Vec<String>,
+    wf_stack: &[WfFrame],
+    entered_wf: &mut Option<EnteredWf>,
+    pending_return: &mut Option<(String, bool)>,
+    do_parallel: bool,
+    batch_ids: &HashSet<String>,
+    in_branch: bool,
+) -> bool {
+    // ★C1 tool_search★:懒加载枢纽(控制信号,不走 dispatch——需注册表 + 当前节点允许名单)。
+    // 按 query 在 deferred 工具里检索,返回命中工具的完整 schema(append 进上下文,前缀不破),之后可直接调。
+    // 节点内按允许名单过滤(节点外的 deferred 搜不到 = 硬锁)。
+    if call.name == crate::executors::TOOL_SEARCH {
+        let pv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+        let query = pv.get("query").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let allow = wf_stack.last().and_then(|f| registry.node_allowed_tools(&f.wf, &f.node));
+        let result = if query.is_empty() {
+            "tool_search 需要 query(工具名 / 关键词 / select:名1,名2)".to_string()
+        } else {
+            registry.search_tools(query, &cfg.prompt_lang, allow.as_ref())
+        };
+        sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: result.clone() }).await;
+        memory.ingest_with_role(format!("tool_search({query}) -> 已返回工具 schema"), "tool");
+        messages.push(ChatMessage::tool_result(call.id.clone(), result));
+        called_tools.push(call.name.clone());
+        return true;
+    }
+
+    // ★工作流即动态函数★:调到一个已注册工作流名 = 进入该工作流(控制信号,不走 dispatch)。
+    // 复用唯一工具调用路径,零新机制(07 原则2/3)。从调用参数解析"函数调用签名"
+    // (input/return_spec/context_mode/direct),收尾时据此压栈(栈调用)或替换帧(直接调用)。
+    if let Some(wf) = registry.workflow(&call.name) {
+        // ★并行批成员★:本调用是本轮 isolated 调查员并发批的一员 → 跳过单帧 push 与即时 ack,
+        // 由循环末尾的并行批跑完后把摘要回灌为它的 tool_result(见下方"并行子代理批")。
+        if do_parallel && batch_ids.contains(&call.id) {
+            return true;
+        }
+        let entry = wf.entry.clone();
+        let sig: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+        let pick = |k: &str| sig.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+        let cmode = sig.get("context_mode").and_then(|v| v.as_str()).unwrap_or("");
+        let isolated = cmode.eq_ignore_ascii_case("isolated");
+        let fork = cmode.eq_ignore_ascii_case("fork"); // fork=看得到父(同 inherit)但退出截断(同 isolated);与 isolated 互斥
+        let direct = sig.get("direct").and_then(|v| v.as_bool()).unwrap_or(false);
+        let max_loops = sig.get("max_loops").and_then(|v| v.as_i64()).unwrap_or(-1);
+        let ack = if wf.node(&entry).is_some() {
+            let mode = if direct { "直接调用(尾调用,主链续)" } else { "栈调用(完成后 workflow_return 返回上层)" };
+            format!("已进入工作流「{}」· {mode}(见下方该步引导)", wf.name)
+        } else {
+            format!("已进入工作流「{}」,但入口节点「{}」不存在", wf.name, entry)
+        };
+        *entered_wf = Some(EnteredWf {
+            wf: wf.name.clone(),
+            entry,
+            input: pick("input"),
+            return_spec: pick("return_spec"),
+            isolated,
+            fork,
+            direct,
+            max_loops,
+        });
+        sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: ack.clone() }).await;
+        memory.ingest_with_role(format!("{} -> {}", call.name, ack), "tool");
+        messages.push(ChatMessage::tool_result(call.id.clone(), ack));
+        return true;
+    }
+
+    // ★栈函数返回 workflow_return(value, full)★:被调工作流的结构化返回(控制信号,不走 dispatch——
+    // 需脊柱的 wf_stack 才能出栈+回灌)。收尾时出栈一层:full=false(默认)截断分支噪音、只回灌 value
+    // (最少充分信息);full=true 不截断、原始工作上下文直通回父(零 LLM 搬运,慎用,污染主上下文)。
+    if call.name == crate::executors::WORKFLOW_RETURN {
+        let rv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+        let value = rv.get("value").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let full = rv.get("full").and_then(|v| v.as_bool()).unwrap_or(false);
+        let ack = if wf_stack.is_empty() {
+            "当前不在工作流中,workflow_return 已忽略".to_string()
+        } else if full {
+            "已请求全量返回上层(原始内容直通)".to_string()
+        } else {
+            "已返回上层(摘要)".to_string()
+        };
+        sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: ack.clone() }).await;
+        memory.ingest_with_role(format!("workflow_return -> {ack}"), "tool");
+        messages.push(ChatMessage::tool_result(call.id.clone(), ack));
+        if !wf_stack.is_empty() {
+            *pending_return = Some((value, full));
+        }
+        return true;
+    }
+
+    // ★二期 B3 结晶(报告-纠正回路写入半)★:learn_process 把一条复发的项目流程结晶进主记忆
+    // (控制信号,不走 dispatch——需脊柱的 &mut Memory + subconscious 嵌入)。近重复取代旧版。
+    // 门控:派生分支内不写主记忆(同记忆门控)→ 跳过结晶,只回执说明。
+    if call.name == crate::executors::LEARN_PROCESS {
+        let pv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+        let name = pv.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let recipe = pv.get("recipe").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let ack = if name.is_empty() || recipe.is_empty() {
+            "learn_process 需要 name + recipe(流程名 + 碰哪几处/什么顺序)".to_string()
+        } else if in_branch {
+            "分支内不结晶流程(主记忆门控);如需沉淀请在对话主链中调用".to_string()
+        } else {
+            let content = format!("【{name}】{recipe}");
+            let (_id, superseded) = memory.crystallize_process(content, subconscious).await;
+            match superseded {
+                Some(_) => format!("已更新项目流程「{name}」(取代了近重复的旧版,下次同类任务自动带上)"),
+                None => format!("已结晶项目流程「{name}」(下次同类任务自动召回照做)"),
+            }
+        };
+        sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: ack.clone() }).await;
+        memory.ingest_with_role(format!("learn_process -> {ack}"), "tool");
+        messages.push(ChatMessage::tool_result(call.id.clone(), ack));
+        called_tools.push(call.name.clone());
+        return true;
+    }
+
+    // ★Skill load_skill★:取一个 skill 的 playbook 正文(控制信号,不走 dispatch——需 Memory
+    // 已学节点 + 内置种子目录)。已学优先、内置兜底;命中 = 正文 append 回上下文(前缀不破),
+    // 未命中 = 列出可用名。这是渐进披露 Skill 的加载枢纽(设计/09 推论5)。
+    if call.name == crate::executors::LOAD_SKILL {
+        let pv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+        let name = pv.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let result = if name.is_empty() {
+            let names = crate::skills::available_names(memory).join(", ");
+            format!("load_skill 需要 name。可用 skill:{names}")
+        } else if let Some(body) = crate::skills::load_body(memory, name) {
+            body
+        } else {
+            let names = crate::skills::available_names(memory).join(", ");
+            format!("没有名为「{name}」的 skill。可用 skill:{names}")
+        };
+        sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: result.clone() }).await;
+        memory.ingest_with_role(format!("load_skill({name}) -> 已加载 playbook"), "tool");
+        messages.push(ChatMessage::tool_result(call.id.clone(), result));
+        called_tools.push(call.name.clone());
+        return true;
+    }
+
+    // ★Skill learn_skill★:把一个 skill(name/trigger/body)结晶进主记忆(控制信号,不走
+    // dispatch——需 &mut Memory + subconscious 嵌入)。近重复/同名取代旧版。分支内不写主记忆(门控)。
+    if call.name == crate::executors::LEARN_SKILL {
+        let pv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+        let name = pv.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let trigger = pv.get("trigger").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let body = pv.get("body").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let ack = if name.is_empty() || trigger.is_empty() || body.is_empty() {
+            "learn_skill 需要 name + trigger(一句话:何时用)+ body(playbook 正文)".to_string()
+        } else if in_branch {
+            "分支内不结晶 skill(主记忆门控);如需沉淀请在对话主链中调用".to_string()
+        } else {
+            let (_id, superseded) = memory.crystallize_skill(name, trigger, body, subconscious).await;
+            match superseded {
+                Some(_) => format!("已更新 skill「{name}」(取代了同名/近重复的旧版,进常驻清单可被主动挑)"),
+                None => format!("已结晶 skill「{name}」(进常驻清单,下次匹配场景可 load_skill 取用)"),
+            }
+        };
+        sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: ack.clone() }).await;
+        memory.ingest_with_role(format!("learn_skill -> {ack}"), "tool");
+        messages.push(ChatMessage::tool_result(call.id.clone(), ack));
+        called_tools.push(call.name.clone());
+        return true;
+    }
+
+    // ★工具记忆 note_tool_memory★(计划/工具记忆-不犯第二遍 A):把一条工具经验结晶进主记忆
+    // (控制信号,不走 dispatch——需 &mut Memory + subconscious 嵌入)。之后分发前会诊用它。
+    if call.name == crate::executors::NOTE_TOOL_MEMORY {
+        let pv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+        let tool = pv.get("tool").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let situation = pv.get("situation").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let verdict = growbox_memory::tool_memory_format::Verdict::parse(
+            pv.get("verdict").and_then(|v| v.as_str()).unwrap_or(""),
+        );
+        let detail = pv.get("detail").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let ack = if tool.is_empty() || situation.is_empty() {
+            "note_tool_memory 需要 tool + situation(关键因素);verdict=infeasible/fails/works".to_string()
+        } else if in_branch {
+            "分支内不写工具记忆(主记忆门控);如需记录请在对话主链中调用".to_string()
+        } else {
+            memory.crystallize_tool_memory(tool, situation, verdict, detail, subconscious).await;
+            match verdict {
+                growbox_memory::tool_memory_format::Verdict::Infeasible => format!(
+                    "已记:工具「{tool}」在此情况「{situation}」不可行。以后高度相似的调用会被拦下(不犯第二遍);关键因素若变了,再 note 一条新情况即可解除。"
+                ),
+                growbox_memory::tool_memory_format::Verdict::Works => {
+                    format!("已记:工具「{tool}」在「{situation}」可行(覆盖此前同情况的旧结论)。")
+                }
+                growbox_memory::tool_memory_format::Verdict::Fails => format!(
+                    "已记:工具「{tool}」在「{situation}」失败。以后相似调用前会提醒你(除非关键因素变了别原样重试)。"
+                ),
+            }
+        };
+        sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: ack.clone() }).await;
+        memory.ingest_with_role(format!("note_tool_memory -> {ack}"), "tool");
+        messages.push(ChatMessage::tool_result(call.id.clone(), ack));
+        called_tools.push(call.name.clone());
+        return true;
+    }
+
+    false // 不是控制信号:调用方继续走安全门 + 真实 dispatch。
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_agent_loop(
     user_msg: &str,
@@ -783,192 +996,17 @@ async fn run_agent_loop(
                 }
             }
 
-            // ★C1 tool_search★:懒加载枢纽(控制信号,不走 dispatch——需注册表 + 当前节点允许名单)。
-            // 按 query 在 deferred 工具里检索,返回命中工具的完整 schema(append 进上下文,前缀不破),之后可直接调。
-            // 节点内按允许名单过滤(节点外的 deferred 搜不到 = 硬锁)。
-            if call.name == crate::executors::TOOL_SEARCH {
-                let pv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-                let query = pv.get("query").and_then(|v| v.as_str()).unwrap_or("").trim();
-                let allow = wf_stack.last().and_then(|f| registry.node_allowed_tools(&f.wf, &f.node));
-                let result = if query.is_empty() {
-                    "tool_search 需要 query(工具名 / 关键词 / select:名1,名2)".to_string()
-                } else {
-                    registry.search_tools(query, &cfg.prompt_lang, allow.as_ref())
-                };
-                sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: result.clone() }).await;
-                memory.ingest_with_role(format!("tool_search({query}) -> 已返回工具 schema"), "tool");
-                messages.push(ChatMessage::tool_result(call.id.clone(), result));
-                called_tools.push(call.name.clone());
-                continue;
-            }
-
-            // ★工作流即动态函数★:调到一个已注册工作流名 = 进入该工作流(控制信号,不走 dispatch)。
-            // 复用唯一工具调用路径,零新机制(07 原则2/3)。从调用参数解析"函数调用签名"
-            // (input/return_spec/context_mode/direct),收尾时据此压栈(栈调用)或替换帧(直接调用)。
-            if let Some(wf) = registry.workflow(&call.name) {
-                // ★并行批成员★:本调用是本轮 isolated 调查员并发批的一员 → 跳过单帧 push 与即时 ack,
-                // 由循环末尾的并行批跑完后把摘要回灌为它的 tool_result(见下方"并行子代理批")。
-                if do_parallel && batch_ids.contains(&call.id) {
-                    continue;
-                }
-                let entry = wf.entry.clone();
-                let sig: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-                let pick = |k: &str| sig.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(String::from);
-                let cmode = sig.get("context_mode").and_then(|v| v.as_str()).unwrap_or("");
-                let isolated = cmode.eq_ignore_ascii_case("isolated");
-                let fork = cmode.eq_ignore_ascii_case("fork"); // fork=看得到父(同 inherit)但退出截断(同 isolated);与 isolated 互斥
-                let direct = sig.get("direct").and_then(|v| v.as_bool()).unwrap_or(false);
-                let max_loops = sig.get("max_loops").and_then(|v| v.as_i64()).unwrap_or(-1);
-                let ack = if wf.node(&entry).is_some() {
-                    let mode = if direct { "直接调用(尾调用,主链续)" } else { "栈调用(完成后 workflow_return 返回上层)" };
-                    format!("已进入工作流「{}」· {mode}(见下方该步引导)", wf.name)
-                } else {
-                    format!("已进入工作流「{}」,但入口节点「{}」不存在", wf.name, entry)
-                };
-                entered_wf = Some(EnteredWf {
-                    wf: wf.name.clone(),
-                    entry,
-                    input: pick("input"),
-                    return_spec: pick("return_spec"),
-                    isolated,
-                    fork,
-                    direct,
-                    max_loops,
-                });
-                sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: ack.clone() }).await;
-                memory.ingest_with_role(format!("{} -> {}", call.name, ack), "tool");
-                messages.push(ChatMessage::tool_result(call.id.clone(), ack));
-                continue;
-            }
-
-            // ★栈函数返回 workflow_return(value, full)★:被调工作流的结构化返回(控制信号,不走 dispatch——
-            // 需脊柱的 wf_stack 才能出栈+回灌)。收尾时出栈一层:full=false(默认)截断分支噪音、只回灌 value
-            // (最少充分信息);full=true 不截断、原始工作上下文直通回父(零 LLM 搬运,慎用,污染主上下文)。
-            if call.name == crate::executors::WORKFLOW_RETURN {
-                let rv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-                let value = rv.get("value").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-                let full = rv.get("full").and_then(|v| v.as_bool()).unwrap_or(false);
-                let ack = if wf_stack.is_empty() {
-                    "当前不在工作流中,workflow_return 已忽略".to_string()
-                } else if full {
-                    "已请求全量返回上层(原始内容直通)".to_string()
-                } else {
-                    "已返回上层(摘要)".to_string()
-                };
-                sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: ack.clone() }).await;
-                memory.ingest_with_role(format!("workflow_return -> {ack}"), "tool");
-                messages.push(ChatMessage::tool_result(call.id.clone(), ack));
-                if !wf_stack.is_empty() {
-                    pending_return = Some((value, full));
-                }
-                continue;
-            }
-
-            // ★二期 B3 结晶(报告-纠正回路写入半)★:learn_process 把一条复发的项目流程结晶进主记忆
-            // (控制信号,不走 dispatch——需脊柱的 &mut Memory + subconscious 嵌入)。近重复取代旧版。
-            // 门控:派生分支内不写主记忆(同记忆门控)→ 跳过结晶,只回执说明。
-            if call.name == crate::executors::LEARN_PROCESS {
-                let pv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-                let name = pv.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
-                let recipe = pv.get("recipe").and_then(|v| v.as_str()).unwrap_or("").trim();
-                let ack = if name.is_empty() || recipe.is_empty() {
-                    "learn_process 需要 name + recipe(流程名 + 碰哪几处/什么顺序)".to_string()
-                } else if in_branch {
-                    "分支内不结晶流程(主记忆门控);如需沉淀请在对话主链中调用".to_string()
-                } else {
-                    let content = format!("【{name}】{recipe}");
-                    let (_id, superseded) = memory.crystallize_process(content, subconscious).await;
-                    match superseded {
-                        Some(_) => format!("已更新项目流程「{name}」(取代了近重复的旧版,下次同类任务自动带上)"),
-                        None => format!("已结晶项目流程「{name}」(下次同类任务自动召回照做)"),
-                    }
-                };
-                sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: ack.clone() }).await;
-                memory.ingest_with_role(format!("learn_process -> {ack}"), "tool");
-                messages.push(ChatMessage::tool_result(call.id.clone(), ack));
-                called_tools.push(call.name.clone());
-                continue;
-            }
-
-            // ★Skill load_skill★:取一个 skill 的 playbook 正文(控制信号,不走 dispatch——需 Memory
-            // 已学节点 + 内置种子目录)。已学优先、内置兜底;命中 = 正文 append 回上下文(前缀不破),
-            // 未命中 = 列出可用名。这是渐进披露 Skill 的加载枢纽(设计/09 推论5)。
-            if call.name == crate::executors::LOAD_SKILL {
-                let pv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-                let name = pv.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
-                let result = if name.is_empty() {
-                    let names = crate::skills::available_names(memory).join(", ");
-                    format!("load_skill 需要 name。可用 skill:{names}")
-                } else if let Some(body) = crate::skills::load_body(memory, name) {
-                    body
-                } else {
-                    let names = crate::skills::available_names(memory).join(", ");
-                    format!("没有名为「{name}」的 skill。可用 skill:{names}")
-                };
-                sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: result.clone() }).await;
-                memory.ingest_with_role(format!("load_skill({name}) -> 已加载 playbook"), "tool");
-                messages.push(ChatMessage::tool_result(call.id.clone(), result));
-                called_tools.push(call.name.clone());
-                continue;
-            }
-
-            // ★Skill learn_skill★:把一个 skill(name/trigger/body)结晶进主记忆(控制信号,不走
-            // dispatch——需 &mut Memory + subconscious 嵌入)。近重复/同名取代旧版。分支内不写主记忆(门控)。
-            if call.name == crate::executors::LEARN_SKILL {
-                let pv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-                let name = pv.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
-                let trigger = pv.get("trigger").and_then(|v| v.as_str()).unwrap_or("").trim();
-                let body = pv.get("body").and_then(|v| v.as_str()).unwrap_or("").trim();
-                let ack = if name.is_empty() || trigger.is_empty() || body.is_empty() {
-                    "learn_skill 需要 name + trigger(一句话:何时用)+ body(playbook 正文)".to_string()
-                } else if in_branch {
-                    "分支内不结晶 skill(主记忆门控);如需沉淀请在对话主链中调用".to_string()
-                } else {
-                    let (_id, superseded) = memory.crystallize_skill(name, trigger, body, subconscious).await;
-                    match superseded {
-                        Some(_) => format!("已更新 skill「{name}」(取代了同名/近重复的旧版,进常驻清单可被主动挑)"),
-                        None => format!("已结晶 skill「{name}」(进常驻清单,下次匹配场景可 load_skill 取用)"),
-                    }
-                };
-                sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: ack.clone() }).await;
-                memory.ingest_with_role(format!("learn_skill -> {ack}"), "tool");
-                messages.push(ChatMessage::tool_result(call.id.clone(), ack));
-                called_tools.push(call.name.clone());
-                continue;
-            }
-
-            // ★工具记忆 note_tool_memory★(计划/工具记忆-不犯第二遍 A):把一条工具经验结晶进主记忆
-            // (控制信号,不走 dispatch——需 &mut Memory + subconscious 嵌入)。之后分发前会诊用它。
-            if call.name == crate::executors::NOTE_TOOL_MEMORY {
-                let pv: serde_json::Value = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-                let tool = pv.get("tool").and_then(|v| v.as_str()).unwrap_or("").trim();
-                let situation = pv.get("situation").and_then(|v| v.as_str()).unwrap_or("").trim();
-                let verdict = growbox_memory::tool_memory_format::Verdict::parse(
-                    pv.get("verdict").and_then(|v| v.as_str()).unwrap_or(""),
-                );
-                let detail = pv.get("detail").and_then(|v| v.as_str()).unwrap_or("").trim();
-                let ack = if tool.is_empty() || situation.is_empty() {
-                    "note_tool_memory 需要 tool + situation(关键因素);verdict=infeasible/fails/works".to_string()
-                } else if in_branch {
-                    "分支内不写工具记忆(主记忆门控);如需记录请在对话主链中调用".to_string()
-                } else {
-                    memory.crystallize_tool_memory(tool, situation, verdict, detail, subconscious).await;
-                    match verdict {
-                        growbox_memory::tool_memory_format::Verdict::Infeasible => format!(
-                            "已记:工具「{tool}」在此情况「{situation}」不可行。以后高度相似的调用会被拦下(不犯第二遍);关键因素若变了,再 note 一条新情况即可解除。"
-                        ),
-                        growbox_memory::tool_memory_format::Verdict::Works => {
-                            format!("已记:工具「{tool}」在「{situation}」可行(覆盖此前同情况的旧结论)。")
-                        }
-                        growbox_memory::tool_memory_format::Verdict::Fails => format!(
-                            "已记:工具「{tool}」在「{situation}」失败。以后相似调用前会提醒你(除非关键因素变了别原样重试)。"
-                        ),
-                    }
-                };
-                sink.emit(AgentEvent::ToolEnd { name: call.name.clone(), ok: true, content: ack.clone() }).await;
-                memory.ingest_with_role(format!("note_tool_memory -> {ack}"), "tool");
-                messages.push(ChatMessage::tool_result(call.id.clone(), ack));
-                called_tools.push(call.name.clone());
+            // ★控制信号(不走 dispatch)★:tool_search / 工作流入口 / workflow_return / learn_process /
+            // load_skill / learn_skill / note_tool_memory —— 这些"工具"需要脊柱的 &mut Memory / wf_stack / 上下文,
+            // Executor trait(只给 &mut ExecCtx)拿不到,故内联处理。收进 handle_control_signal 单一 chokepoint
+            // (返回 true = 已处理本步,跳过真实 dispatch;false = 不是控制信号,继续走安全门 + dispatch)。
+            if handle_control_signal(
+                call, registry, cfg, sink, memory, subconscious,
+                &mut messages, &mut called_tools, &wf_stack, &mut entered_wf, &mut pending_return,
+                do_parallel, &batch_ids, in_branch,
+            )
+            .await
+            {
                 continue;
             }
 
