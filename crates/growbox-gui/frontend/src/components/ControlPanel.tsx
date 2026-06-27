@@ -157,10 +157,10 @@ const ControlPanel: Component = () => {
       {/* 记忆网络 */}
       <div class="ctrl-section">
         <div class="ctrl-section-title">
-          <span class="ctrl-icon"><IconBrain /></span> {t("ctrlMemoryNetwork") || "记忆网络"}
+          <span class="ctrl-icon"><IconBrain /></span> {t("ctrlMemoryNetwork")}
           {/* 展开记忆网络可视化(原入口在状态栏劳累度绿点,劳累度已并入下方仪表,绿点移除后入口移到这) */}
           <button
-            title={t("ctrlOpenMemViz") || "展开记忆网络可视化"}
+            title={t("ctrlOpenMemViz")}
             onClick={() => openMemoryViz()}
             style={{
               "margin-left": "auto",
@@ -187,28 +187,28 @@ const ControlPanel: Component = () => {
         </div>
         <Show when={memStats()} fallback={
           <div class="pd-empty" style={{ "font-size": "12px" }}>
-            {t("ctrlNoMemoryData") || "暂无记忆数据"}
+            {t("ctrlNoMemoryData")}
           </div>
         }>
           <div class="ctrl-grid">
             <div class="ctrl-cell">
               <div class="ctrl-cell-val">{memStats()!.total_nodes}</div>
-              <div class="ctrl-cell-lbl">{t("ctrlTotalNodes") || "节点数"}</div>
+              <div class="ctrl-cell-lbl">{t("ctrlTotalNodes")}</div>
             </div>
             <div class="ctrl-cell">
               <div class="ctrl-cell-val">{memStats()!.total_pointers}</div>
-              <div class="ctrl-cell-lbl">{t("ctrlTotalPointers") || "指针数"}</div>
+              <div class="ctrl-cell-lbl">{t("ctrlTotalPointers")}</div>
             </div>
           </div>
           {/* 真置换=工作区(缓存队列=存放区):随检索填充,满了是常态,Nap 清零;真/假指针=L2/RAG 命中各几条。 */}
           <div class="ctrl-note" style={{ "margin-top": "6px", "font-size": "11px" }}>
-            {t("queueOccupancy") || "缓存队列"}:
-            {memStats()!.queue.resident} · {(memStats()!.queue.fill_pct * 100).toFixed(1)}% · {t("ptrReal") || "真指针"} {memStats()!.queue.real_pointers} · {t("ptrFake") || "假指针"} {memStats()!.queue.fake_pointers} · {t("shmEvictions") || "淘汰"} {memStats()!.queue.evictions}
+            {t("queueOccupancy")}:
+            {memStats()!.queue.resident} · {(memStats()!.queue.fill_pct * 100).toFixed(1)}% · {t("ptrReal")} {memStats()!.queue.real_pointers} · {t("ptrFake")} {memStats()!.queue.fake_pointers} · {t("shmEvictions")} {memStats()!.queue.evictions}
           </div>
           {/* L2 导航缓存=纯内部加速层(页表层翻图缓存),非记忆缓存,不再作为面板指标显示。 */}
           {/* 仅保留容量旋钮(数值全可设,推论9);标注清楚是内部 L2 加速,不冒充"记忆缓存"。 */}
           <div class="ctrl-row" style={{ "margin-top": "6px", gap: "6px" }}>
-            <span style={{ opacity: 0.6 }}>{t("l2NavCacheCap") || "L2翻图缓存容量(内部)"}</span>
+            <span style={{ opacity: 0.6 }}>{t("l2NavCacheCap")}</span>
             <input
               type="number"
               min="1"
@@ -227,10 +227,10 @@ const ControlPanel: Component = () => {
           {/* 学习型指针旋钮(推论9 数值全可设)。即时生效(下次检索即用)+ 落库。 */}
           <Show when={memStats()!.pointer}>
             <div class="ctrl-note" style={{ "margin-top": "8px", "font-size": "11px", "font-weight": 600 }}>
-              {t("ptrSectionTitle") || "学习型指针"}
+              {t("ptrSectionTitle")}
             </div>
             <div class="ctrl-row" style={{ "margin-top": "4px", gap: "6px" }}>
-              <span>{t("ptrMatchMode") || "匹配档"}</span>
+              <span>{t("ptrMatchMode")}</span>
               <select
                 value={memStats()!.pointer.match_mode}
                 onChange={(e) => savePtr({ matchMode: e.currentTarget.value })}
@@ -239,12 +239,12 @@ const ControlPanel: Component = () => {
                   "border-radius": "4px", color: "inherit", font: "inherit", padding: "1px 4px",
                 }}
               >
-                <option value="weighted_cosine">{t("ptrModeCosine") || "加权余弦(快)"}</option>
-                <option value="llm_judge">{t("ptrModeLlm") || "LLM 判断(精)"}</option>
+                <option value="weighted_cosine">{t("ptrModeCosine")}</option>
+                <option value="llm_judge">{t("ptrModeLlm")}</option>
               </select>
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("ptrFollow") || "跟随门"}</span>
+              <span>{t("ptrFollow")}</span>
               <input
                 type="number" min="0" max="3" step="0.05" value={memStats()!.pointer.follow_threshold}
                 onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!Number.isNaN(v)) savePtr({ followThreshold: v }); }}
@@ -252,7 +252,7 @@ const ControlPanel: Component = () => {
               />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("ptrNegBlock") || "反K否决阈"}</span>
+              <span>{t("ptrNegBlock")}</span>
               <input
                 type="number" min="0" max="1" step="0.01" value={memStats()!.pointer.neg_block_threshold}
                 onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!Number.isNaN(v)) savePtr({ negBlockThreshold: v }); }}
@@ -260,7 +260,7 @@ const ControlPanel: Component = () => {
               />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("ptrKMerge") || "坍缩阈"}</span>
+              <span>{t("ptrKMerge")}</span>
               <input
                 type="number" min="0" max="1" step="0.01" value={memStats()!.pointer.k_merge_threshold}
                 onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!Number.isNaN(v)) savePtr({ kMergeThreshold: v }); }}
@@ -268,7 +268,7 @@ const ControlPanel: Component = () => {
               />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("ptrWeightGain") || "权重增益"}</span>
+              <span>{t("ptrWeightGain")}</span>
               <input
                 type="number" min="0" max="2" step="0.05" value={memStats()!.pointer.weight_gain}
                 onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!Number.isNaN(v)) savePtr({ weightGain: v }); }}
@@ -276,7 +276,7 @@ const ControlPanel: Component = () => {
               />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("ptrKCap") || "K 上限"}</span>
+              <span>{t("ptrKCap")}</span>
               <input
                 type="number" min="1" step="1" value={memStats()!.pointer.k_cap}
                 onChange={(e) => { const v = parseInt(e.currentTarget.value, 10); if (!Number.isNaN(v) && v > 0) savePtr({ kCap: v }); }}
@@ -286,9 +286,9 @@ const ControlPanel: Component = () => {
             {/* 档A 命中后是否仍走前沿 judge 确认(精确 vs 省钱)。仅档A 有意义,档B 下置灰。 */}
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
               <span
-                title={t("ptrForceJudgeHint") || "档A 余弦命中后是否仍调一次 LLM 确认:开=更精确,关=省 LLM 调用、命中即采纳"}
+                title={t("ptrForceJudgeHint")}
                 style={{ opacity: memStats()!.pointer.match_mode === "weighted_cosine" ? 1 : 0.45 }}
-              >{t("ptrForceJudge") || "命中仍确认"}</span>
+              >{t("ptrForceJudge")}</span>
               <input
                 type="checkbox"
                 checked={memStats()!.pointer.force_judge}
@@ -301,10 +301,10 @@ const ControlPanel: Component = () => {
           {/* 检索行为旋钮(推论9 数值全可设)。即时生效(下次检索即用)+ 落库。 */}
           <Show when={memStats()!.retrieval}>
             <div class="ctrl-note" style={{ "margin-top": "8px", "font-size": "11px", "font-weight": 600 }}>
-              {t("retrSectionTitle") || "检索行为"}
+              {t("retrSectionTitle")}
             </div>
             <div class="ctrl-row" style={{ "margin-top": "4px", gap: "6px" }}>
-              <span title={t("retrRagHitHint") || "第一层 RAG 命中阈:首条相似度 ≥ 此值即直接返回不下沉;调低=更爱用浅层 RAG、少下沉精确层"}>{t("retrRagHit") || "RAG 命中阈"}</span>
+              <span title={t("retrRagHitHint")}>{t("retrRagHit")}</span>
               <input
                 type="number" min="0" max="1" step="0.01" value={memStats()!.retrieval.rag_hit_threshold}
                 onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!Number.isNaN(v)) saveRetrieval({ ragHitThreshold: v }); }}
@@ -312,7 +312,7 @@ const ControlPanel: Component = () => {
               />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("retrRagTopk") || "RAG 候选数"}</span>
+              <span>{t("retrRagTopk")}</span>
               <input
                 type="number" min="1" step="1" value={memStats()!.retrieval.rag_topk}
                 onChange={(e) => { const v = parseInt(e.currentTarget.value, 10); if (!Number.isNaN(v) && v > 0) saveRetrieval({ ragTopk: v }); }}
@@ -320,7 +320,7 @@ const ControlPanel: Component = () => {
               />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span title={t("retrEntryKHint") || "精确层进图入口数:向量索引取 top-K 节点作下沉的门"}>{t("retrEntryK") || "进图入口数"}</span>
+              <span title={t("retrEntryKHint")}>{t("retrEntryK")}</span>
               <input
                 type="number" min="1" step="1" value={memStats()!.retrieval.entry_k}
                 onChange={(e) => { const v = parseInt(e.currentTarget.value, 10); if (!Number.isNaN(v) && v > 0) saveRetrieval({ entryK: v }); }}
@@ -328,7 +328,7 @@ const ControlPanel: Component = () => {
               />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("retrEntryMinSim") || "入口最低相似"}</span>
+              <span>{t("retrEntryMinSim")}</span>
               <input
                 type="number" min="0" max="1" step="0.01" value={memStats()!.retrieval.entry_min_sim}
                 onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!Number.isNaN(v)) saveRetrieval({ entryMinSim: v }); }}
@@ -336,7 +336,7 @@ const ControlPanel: Component = () => {
               />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span title={t("retrScanBatchHint") || "精确层线性扫时每批给 LLM judge 的节点数(一个窗口)"}>{t("retrScanBatch") || "扫描批量"}</span>
+              <span title={t("retrScanBatchHint")}>{t("retrScanBatch")}</span>
               <input
                 type="number" min="1" step="1" value={memStats()!.retrieval.scan_batch}
                 onChange={(e) => { const v = parseInt(e.currentTarget.value, 10); if (!Number.isNaN(v) && v > 0) saveRetrieval({ scanBatch: v }); }}
@@ -344,7 +344,7 @@ const ControlPanel: Component = () => {
               />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span title={t("retrProjectBoostHint") || "项目软偏好:检索命中属当前项目时相似度乘(1+此值)再排序。0=不偏好;0.5=本项目+50%。软偏好非硬过滤,跨项目高相关仍会被召回"}>{t("retrProjectBoost") || "本项目偏好"}</span>
+              <span title={t("retrProjectBoostHint")}>{t("retrProjectBoost")}</span>
               <input
                 type="number" min="0" step="0.05" value={memStats()!.retrieval.project_boost}
                 onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!Number.isNaN(v) && v >= 0) saveRetrieval({ projectBoost: v }); }}
@@ -355,10 +355,10 @@ const ControlPanel: Component = () => {
           {/* 疲劳公式权重旋钮(推论9 数值全可设)。三权重决定"AI 凭什么觉得累",配套上方睡眠疲劳阈。 */}
           <Show when={memStats()!.fatigue_weights}>
             <div class="ctrl-note" style={{ "margin-top": "8px", "font-size": "11px", "font-weight": 600 }}>
-              {t("fatSectionTitle") || "疲劳权重"}
+              {t("fatSectionTitle")}
             </div>
             <div class="ctrl-row" style={{ "margin-top": "4px", gap: "6px" }}>
-              <span title={t("fatHint") || "疲劳=命中率低×W1+淘汰×W2+碎片×W3(0~1)。调高某项=更看重该信号触发做梦睡眠"}>{t("fatHitrate") || "命中率低权重"}</span>
+              <span title={t("fatHint")}>{t("fatHitrate")}</span>
               <input
                 type="number" min="0" max="2" step="0.05" value={memStats()!.fatigue_weights.w_hitrate}
                 onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!Number.isNaN(v) && v >= 0) saveFatigue({ wHitrate: v }); }}
@@ -366,7 +366,7 @@ const ControlPanel: Component = () => {
               />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("fatEvict") || "淘汰权重"}</span>
+              <span>{t("fatEvict")}</span>
               <input
                 type="number" min="0" max="2" step="0.05" value={memStats()!.fatigue_weights.w_evict}
                 onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!Number.isNaN(v) && v >= 0) saveFatigue({ wEvict: v }); }}
@@ -374,7 +374,7 @@ const ControlPanel: Component = () => {
               />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("fatFragment") || "碎片权重"}</span>
+              <span>{t("fatFragment")}</span>
               <input
                 type="number" min="0" max="2" step="0.05" value={memStats()!.fatigue_weights.w_fragment}
                 onChange={(e) => { const v = parseFloat(e.currentTarget.value); if (!Number.isNaN(v) && v >= 0) saveFatigue({ wFragment: v }); }}
@@ -385,40 +385,40 @@ const ControlPanel: Component = () => {
           {/* 瞬态容量旋钮(推论9 数值全可设,最低价值组)。可再生工作集的有界上限,改后清空重建。 */}
           <Show when={memStats()!.transient}>
             <div class="ctrl-note" style={{ "margin-top": "8px", "font-size": "11px", "font-weight": 600 }}>
-              {t("tcSectionTitle") || "瞬态容量"}
+              {t("tcSectionTitle")}
             </div>
             <div class="ctrl-row" style={{ "margin-top": "4px", gap: "6px" }}>
-              <span title={t("tcHint") || "可再生工作集的容量上限(真相在磁盘);改动会清空重建对应缓冲。多数人无需调。"}>{t("tcFragment") || "碎片台账"}</span>
+              <span title={t("tcHint")}>{t("tcFragment")}</span>
               <input type="number" min="1" step="64" value={memStats()!.transient.fragment_ledger_cap}
                 onChange={(e) => { const v = parseInt(e.currentTarget.value, 10); if (!Number.isNaN(v) && v > 0) saveTransient({ fragmentLedgerCap: v }); }}
                 style={{ width: "72px", "text-align": "right", background: "transparent", border: "1px solid var(--border, #3a3a3c)", "border-radius": "4px", color: "inherit", font: "inherit", padding: "1px 4px" }} />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("tcSecondary") || "二级索引"}</span>
+              <span>{t("tcSecondary")}</span>
               <input type="number" min="1" step="16" value={memStats()!.transient.secondary_index_cap}
                 onChange={(e) => { const v = parseInt(e.currentTarget.value, 10); if (!Number.isNaN(v) && v > 0) saveTransient({ secondaryIndexCap: v }); }}
                 style={{ width: "72px", "text-align": "right", background: "transparent", border: "1px solid var(--border, #3a3a3c)", "border-radius": "4px", color: "inherit", font: "inherit", padding: "1px 4px" }} />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("tcInternalEvents") || "内部事件环"}</span>
+              <span>{t("tcInternalEvents")}</span>
               <input type="number" min="1" step="8" value={memStats()!.transient.internal_events_cap}
                 onChange={(e) => { const v = parseInt(e.currentTarget.value, 10); if (!Number.isNaN(v) && v > 0) saveTransient({ internalEventsCap: v }); }}
                 style={{ width: "72px", "text-align": "right", background: "transparent", border: "1px solid var(--border, #3a3a3c)", "border-radius": "4px", color: "inherit", font: "inherit", padding: "1px 4px" }} />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span title={t("tcArtifactHint") || "被造物(AI 现造的 UI)交互回传环的容量上限;超出丢最旧。多数人无需调。"}>{t("tcArtifact") || "造物交互环"}</span>
+              <span title={t("tcArtifactHint")}>{t("tcArtifact")}</span>
               <input type="number" min="1" step="16" value={memStats()!.transient.artifact_interactions_cap}
                 onChange={(e) => { const v = parseInt(e.currentTarget.value, 10); if (!Number.isNaN(v) && v > 0) saveTransient({ artifactInteractionsCap: v }); }}
                 style={{ width: "72px", "text-align": "right", background: "transparent", border: "1px solid var(--border, #3a3a3c)", "border-radius": "4px", color: "inherit", font: "inherit", padding: "1px 4px" }} />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span title={t("tcNegAgeHint") || "被否决的跳转记录多久后,睡眠复核时老化解封(纠正历史误判)"}>{t("tcNegAge") || "反K老化(天)"}</span>
+              <span title={t("tcNegAgeHint")}>{t("tcNegAge")}</span>
               <input type="number" min="1" step="1" value={memStats()!.transient.neg_review_max_age_days}
                 onChange={(e) => { const v = parseInt(e.currentTarget.value, 10); if (!Number.isNaN(v) && v > 0) saveTransient({ negReviewMaxAgeDays: v }); }}
                 style={{ width: "72px", "text-align": "right", background: "transparent", border: "1px solid var(--border, #3a3a3c)", "border-radius": "4px", color: "inherit", font: "inherit", padding: "1px 4px" }} />
             </div>
             <div class="ctrl-row" style={{ "margin-top": "2px", gap: "6px" }}>
-              <span>{t("tcNegEdges") || "反K复核边数"}</span>
+              <span>{t("tcNegEdges")}</span>
               <input type="number" min="1" step="16" value={memStats()!.transient.neg_review_max_edges}
                 onChange={(e) => { const v = parseInt(e.currentTarget.value, 10); if (!Number.isNaN(v) && v > 0) saveTransient({ negReviewMaxEdges: v }); }}
                 style={{ width: "72px", "text-align": "right", background: "transparent", border: "1px solid var(--border, #3a3a3c)", "border-radius": "4px", color: "inherit", font: "inherit", padding: "1px 4px" }} />
@@ -428,10 +428,10 @@ const ControlPanel: Component = () => {
           <div
             class="ctrl-row"
             style={{ "margin-top": "4px", cursor: "pointer" }}
-            title={t("ctrlOpenMemViz") || "展开记忆网络可视化"}
+            title={t("ctrlOpenMemViz")}
             onClick={() => openMemoryViz()}
           >
-            <span>{t("ctrlFatigue") || "劳累度"}</span>
+            <span>{t("ctrlFatigue")}</span>
             <span
               class="ctrl-mono"
               style={{ color: fatigueColor(memStats()!.fatigue.fatigue_value) }}
@@ -445,24 +445,24 @@ const ControlPanel: Component = () => {
       {/* 双网络 */}
       <div class="ctrl-section">
         <div class="ctrl-section-title">
-          <span class="ctrl-icon"><IconNetwork /></span> {t("ctrlDualNetwork") || "双网络"}
+          <span class="ctrl-icon"><IconNetwork /></span> {t("ctrlDualNetwork")}
         </div>
         <Show when={netStatus()} fallback={
           <div class="pd-empty" style={{ "font-size": "12px" }}>
-            {t("ctrlNoNetworkData") || "暂无网络数据"}
+            {t("ctrlNoNetworkData")}
           </div>
         }>
           <div class="ctrl-row">
-            <span>{t("ctrlMainModel") || "主模型"}</span>
+            <span>{t("ctrlMainModel")}</span>
             <span class="ctrl-mono">{netStatus()!.main_model || "—"}</span>
           </div>
           <div class="ctrl-row">
-            <span>{t("ctrlSubModel") || "潜意识模型"}</span>
-            <span class="ctrl-mono">{netStatus()!.sub_model || (t("ctrlNotConfigured") || "未配置")}</span>
+            <span>{t("ctrlSubModel")}</span>
+            <span class="ctrl-mono">{netStatus()!.sub_model || (t("ctrlNotConfigured"))}</span>
           </div>
           <div class="ctrl-row">
-            <span>{t("ctrlEmbedding") || "嵌入状态"}</span>
-            <span class="ctrl-mono">{netStatus()!.has_embedder ? (t("ctrlEnabled") || "已启用") : (t("ctrlDisabled") || "未启用")}</span>
+            <span>{t("ctrlEmbedding")}</span>
+            <span class="ctrl-mono">{netStatus()!.has_embedder ? (t("ctrlEnabled")) : (t("ctrlDisabled"))}</span>
           </div>
         </Show>
       </div>
@@ -470,10 +470,10 @@ const ControlPanel: Component = () => {
       {/* 注意力间隔 */}
       <div class="ctrl-section">
         <div class="ctrl-section-title">
-          <span class="ctrl-icon"><IconBrain /></span> {t("ctrlAttentionSpan") || "注意力间隔"}
+          <span class="ctrl-icon"><IconBrain /></span> {t("ctrlAttentionSpan")}
         </div>
         <div class="ctrl-row">
-          <span>{t("ctrlCurrentAttentionSpan") || "当前值"}</span>
+          <span>{t("ctrlCurrentAttentionSpan")}</span>
           <span class="ctrl-mono">{statusInfo()?.attention_span ?? "—"}</span>
         </div>
       </div>
@@ -481,13 +481,13 @@ const ControlPanel: Component = () => {
       {/* Intent 信号 (kept) */}
       <div class="ctrl-section">
         <div class="ctrl-section-title">
-          <span class="ctrl-icon"><IconIntent /></span> {t("ctrlIntent") || "Intent 信号"}
+          <span class="ctrl-icon"><IconIntent /></span> {t("ctrlIntent")}
         </div>
         <Show
           when={intentEvents().length > 0}
           fallback={
             <div class="pd-empty" style={{ "font-size": "12px" }}>
-              {t("ctrlNoIntent") || "暂无意图信号(对话产生后自动显示)"}
+              {t("ctrlNoIntent")}
             </div>
           }
         >
@@ -514,11 +514,11 @@ const ControlPanel: Component = () => {
       {/* 数据保护 (Safety - kept) */}
       <div class="ctrl-section">
         <div class="ctrl-section-title">
-          <span class="ctrl-icon"><IconShield /></span> {t("ctrlSafety") || "数据保护"}
+          <span class="ctrl-icon"><IconShield /></span> {t("ctrlSafety")}
         </div>
         <Show when={state()}>
           <div class="ctrl-row">
-            <span>{t("ctrlBackups") || "备份"}</span>
+            <span>{t("ctrlBackups")}</span>
             <span class="ctrl-mono">{state()!.safety.backup_count}</span>
           </div>
           <Show when={state()!.safety.backups_dir}>

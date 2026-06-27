@@ -408,7 +408,7 @@ const ChatArea: Component = () => {
         <div class="chat-toolbar-spacer" />
         <button
           class="chat-toolbar-btn"
-          title={t("settings") || "设置"}
+          title={t("settings")}
           onClick={() => { sfx.tap(); setSettingsOpen(true); }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -418,7 +418,7 @@ const ChatArea: Component = () => {
         </button>
         <button
           class="chat-toolbar-btn"
-          title={t("healthMonitor") || "系统健康监控"}
+          title={t("healthMonitor")}
           onClick={() => { sfx.tap(); setHealthMonitorOpen(true); }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -427,7 +427,7 @@ const ChatArea: Component = () => {
         </button>
         <button
           class="chat-toolbar-btn"
-          title={t("historyPanel") || "会话历史"}
+          title={t("historyPanel")}
           onClick={() => { sfx.tap(); setHistoryDrawerOpen((p: boolean) => !p); }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -529,7 +529,7 @@ const ChatArea: Component = () => {
       <Show when={showJumpToBottom()}>
         <button
           class="jump-to-bottom"
-          title={t("jumpToBottom") || "回到底部"}
+          title={t("jumpToBottom")}
           onClick={() => {
             sfx.tap();
             if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(20);

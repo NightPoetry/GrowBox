@@ -71,33 +71,33 @@ const MemoryViz: Component = () => {
     <Show when={memoryVizOpen()}>
       <div class="memviz-panel" ref={panelEl}>
         <div class="memviz-header">
-          <h3>{t("memvizTitle") || "记忆网络"}</h3>
+          <h3>{t("memvizTitle")}</h3>
           <button class="memviz-refresh" onClick={() => void fetchStats()} disabled={loading()}>
             {loading() ? "..." : "↻"}
           </button>
           <button class="memviz-close" onClick={closeMemoryViz}>&times;</button>
         </div>
-        <Show when={data()} fallback={<p class="memviz-empty">{t("memvizNoData") || "暂无数据"}</p>}>
+        <Show when={data()} fallback={<p class="memviz-empty">{t("memvizNoData")}</p>}>
           <div class="memviz-body">
             {/* -- Node counts -- */}
             <div class="memviz-section">
-              <div class="memviz-section-title">{t("memvizNodesPointers") || "节点与指针"}</div>
+              <div class="memviz-section-title">{t("memvizNodesPointers")}</div>
               <div class="memviz-row">
-                <span class="memviz-label">{t("ctrlTotalNodes") || "节点数"}</span>
+                <span class="memviz-label">{t("ctrlTotalNodes")}</span>
                 <span class="memviz-value">{data()!.total_nodes}</span>
               </div>
               <div class="memviz-row">
-                <span class="memviz-label">{t("ctrlTotalPointers") || "指针数"}</span>
+                <span class="memviz-label">{t("ctrlTotalPointers")}</span>
                 <span class="memviz-value">{data()!.total_pointers}</span>
               </div>
             </div>
 
             {/* -- 队列占用(工作区=置换系统的"物理内存",真置换在此;满了是常态,Nap 清零)-- */}
             <div class="memviz-section">
-              <div class="memviz-section-title">{t("queueOccupancy") || "队列占用"}</div>
+              <div class="memviz-section-title">{t("queueOccupancy")}</div>
               <div class="memviz-cache-tiers">
                 <div class="memviz-tier">
-                  <span class="memviz-tier-label">{t("cacheUsage") || "占用"}</span>
+                  <span class="memviz-tier-label">{t("cacheUsage")}</span>
                   <div class="memviz-bar-track">
                     <div class="memviz-bar-fill" style={{ width: `${Math.min(100, data()!.queue.fill_pct * 100)}%` }} />
                   </div>
@@ -105,16 +105,16 @@ const MemoryViz: Component = () => {
                 </div>
               </div>
               <div class="memviz-row">
-                <span class="memviz-label">{t("queueResident") || "常驻"}</span>
+                <span class="memviz-label">{t("queueResident")}</span>
                 <span class="memviz-value">{data()!.queue.resident}</span>
               </div>
               <div class="memviz-row">
-                <span class="memviz-label">{t("memvizEvictions") || "总淘汰次数"}</span>
+                <span class="memviz-label">{t("memvizEvictions")}</span>
                 <span class="memviz-value">{data()!.queue.evictions}</span>
               </div>
               {/* 队列里真指针(L2/精确层命中)/ 假指针(RAG 命中,不落序列)各几条。统一概念 2026-06-16。 */}
               <div class="memviz-row">
-                <span class="memviz-label">{t("ptrReal") || "真指针"} / {t("ptrFake") || "假指针"}</span>
+                <span class="memviz-label">{t("ptrReal")} / {t("ptrFake")}</span>
                 <span class="memviz-value">{data()!.queue.real_pointers} / {data()!.queue.fake_pointers}</span>
               </div>
             </div>
@@ -124,7 +124,7 @@ const MemoryViz: Component = () => {
 
             {/* -- Fatigue -- */}
             <div class="memviz-section">
-              <div class="memviz-section-title">{t("shmFatigue") || "劳累度"}</div>
+              <div class="memviz-section-title">{t("shmFatigue")}</div>
               <div class="memviz-fatigue-bar">
                 <div class="memviz-bar-track">
                   <div
@@ -143,32 +143,32 @@ const MemoryViz: Component = () => {
                 </span>
               </div>
               <div class="memviz-row">
-                <span class="memviz-label">{t("shmCacheHitRate") || "命中率"}</span>
+                <span class="memviz-label">{t("shmCacheHitRate")}</span>
                 <span class="memviz-value">{pct(data()!.fatigue.cache_hit_rate)}</span>
               </div>
               <div class="memviz-row">
-                <span class="memviz-label">{t("memvizEvictionRate") || "淘汰速率"}</span>
+                <span class="memviz-label">{t("memvizEvictionRate")}</span>
                 <span class="memviz-value">{data()!.fatigue.eviction_rate.toFixed(0)}</span>
               </div>
               <div class="memviz-row">
-                <span class="memviz-label">{t("shmFragments") || "碎片"}</span>
+                <span class="memviz-label">{t("shmFragments")}</span>
                 <span class="memviz-value">{data()!.fatigue.fragment_count}</span>
               </div>
             </div>
 
             {/* -- Secondary indexes -- */}
             <div class="memviz-section">
-              <div class="memviz-section-title">{t("memvizSecondaryIndexes") || "二级索引"}</div>
+              <div class="memviz-section-title">{t("memvizSecondaryIndexes")}</div>
               <div class="memviz-row">
-                <span class="memviz-label">{t("memvizTotal") || "总数"}</span>
+                <span class="memviz-label">{t("memvizTotal")}</span>
                 <span class="memviz-value">{data()!.secondary_indexes.total}</span>
               </div>
               <div class="memviz-row">
-                <span class="memviz-label">{t("memvizForcedJumps") || "强制跳转"}</span>
+                <span class="memviz-label">{t("memvizForcedJumps")}</span>
                 <span class="memviz-value">{data()!.secondary_indexes.forced_jumps}</span>
               </div>
               <div class="memviz-row">
-                <span class="memviz-label">{t("memvizFragmentCount") || "碎片数"}</span>
+                <span class="memviz-label">{t("memvizFragmentCount")}</span>
                 <span class="memviz-value">{data()!.secondary_indexes.fragment_count}</span>
               </div>
             </div>

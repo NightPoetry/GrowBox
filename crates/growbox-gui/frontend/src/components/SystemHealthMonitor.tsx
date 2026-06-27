@@ -149,7 +149,7 @@ const SystemHealthMonitor: Component = () => {
 
   const uptimeLabel = (): string => {
     const at = connectedAt();
-    if (!connected() || !at) return t("shmOffline") || "未连接";
+    if (!connected() || !at) return t("shmOffline");
     return fmtUptime(now() - at);
   };
 
@@ -168,20 +168,20 @@ const SystemHealthMonitor: Component = () => {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
             </svg>
-            <span class="shm-title">{t("healthMonitor") || "系统健康监控"}</span>
+            <span class="shm-title">{t("healthMonitor")}</span>
             <button class="shm-close" onClick={() => { sfx.tap(); setHealthMonitorOpen(false); }}>×</button>
           </div>
 
           <div class="shm-body">
             {/* ── 运行 ── */}
-            <div class="shm-section">{t("regionRuntime") || "运行"}</div>
+            <div class="shm-section">{t("regionRuntime")}</div>
             <MetricRow
               icon={() => <IconPlug />}
-              label={t("shmConnection") || "连接"}
+              label={t("shmConnection")}
               value={() => (
                 <span class={`shm-conn ${connected() ? "ok" : "off"}`}>
                   <span class="shm-dot" />
-                  <span>{connected() ? (modelSig() || "—") : (t("disconnected") || "未连接")}</span>
+                  <span>{connected() ? (modelSig() || "—") : (t("disconnected"))}</span>
                 </span>
               )}
               hint={() => <span>{uptimeLabel()}</span>}
@@ -190,7 +190,7 @@ const SystemHealthMonitor: Component = () => {
             {/* 实时上下文压力:最近请求实发上下文 token / 上下文窗口总量 */}
             <MetricRow
               icon={() => <IconGauge />}
-              label={t("contextPressure") || "上下文压力"}
+              label={t("contextPressure")}
               value={() => {
                 const tk = statusInfo()?.ctx_prompt_tokens ?? 0;
                 const win = statusInfo()?.ctx_window_tokens ?? 0;
@@ -214,7 +214,7 @@ const SystemHealthMonitor: Component = () => {
 
             <MetricRow
               icon={() => <IconAlert />}
-              label={t("shmErrorRate") || "错误率"}
+              label={t("shmErrorRate")}
               value={() => {
                 const pct = ctrl()?.error_rate_pct ?? 0;
                 return <span class="shm-mono">{pct.toFixed(1)}%</span>;
@@ -222,13 +222,13 @@ const SystemHealthMonitor: Component = () => {
               hint={() => {
                 const fail = ctrl()?.tool_call_fail ?? 0;
                 const total = ctrl()?.tool_call_total ?? 0;
-                return <span>{fail}/{total} {t("shmFailures") || "次失败"}</span>;
+                return <span>{fail}/{total} {t("shmFailures")}</span>;
               }}
             />
 
             <MetricRow
               icon={() => <IconJson />}
-              label={t("shmJsonCall") || "JSON Call 服从率"}
+              label={t("shmJsonCall")}
               value={() => {
                 const pct = ctrl()?.json_compliance_pct ?? 0;
                 return <span class="shm-mono">{pct.toFixed(0)}%</span>;
@@ -236,30 +236,30 @@ const SystemHealthMonitor: Component = () => {
               hint={() => {
                 const valid = ctrl()?.json_call_valid ?? 0;
                 const total = ctrl()?.json_call_total ?? 0;
-                return <span>{valid}/{total} {t("shmValidCalls") || "有效调用"}</span>;
+                return <span>{valid}/{total} {t("shmValidCalls")}</span>;
               }}
             />
 
             <MetricRow
               icon={() => <IconShield />}
-              label={t("shmSafety") || "数据保护"}
+              label={t("shmSafety")}
               value={() => {
                 const n = ctrl()?.safety.backup_count ?? 0;
                 return <span class="shm-mono">{n}</span>;
               }}
               hint={() => {
                 const n = ctrl()?.safety.backup_count ?? 0;
-                return <span>{n} {t("shmSafetyHint") || "次备份（file_write 覆写时快照）"}</span>;
+                return <span>{n} {t("shmSafetyHint")}</span>;
               }}
             />
 
             {/* ── 存放区·临时记忆(唯一的"记忆缓存";RAG/L2 命中都进这里)── */}
-            <div class="shm-section">{t("regionStore") || "存放区·临时记忆"}</div>
+            <div class="shm-section">{t("regionStore")}</div>
 
             {/* 缓存队列(工作区=存放区=置换系统"物理内存"):占用/预算填充度,队列从空涨起,满了是常态,Nap 清零。 */}
             <MetricRow
               icon={() => <IconGauge />}
-              label={t("queueOccupancy") || "缓存队列"}
+              label={t("queueOccupancy")}
               value={() => {
                 const q = memStats()?.queue;
                 if (!q) return <span class="shm-mono">—</span>;
@@ -277,14 +277,14 @@ const SystemHealthMonitor: Component = () => {
               hint={() => {
                 const q = memStats()?.queue;
                 if (!q) return <span>—</span>;
-                return <span>{t("queueResident") || "常驻"} {q.resident ?? 0} · {t("ptrReal") || "真指针"} {q.real_pointers ?? 0} · {t("ptrFake") || "假指针"} {q.fake_pointers ?? 0} · {t("shmEvictions") || "淘汰"} {q.evictions ?? 0}</span>;
+                return <span>{t("queueResident")} {q.resident ?? 0} · {t("ptrReal")} {q.real_pointers ?? 0} · {t("ptrFake")} {q.fake_pointers ?? 0} · {t("shmEvictions")} {q.evictions ?? 0}</span>;
               }}
             />
 
             {/* 记忆置换率:工作区真换出频率 = 缓存队列换出 = 记忆区换出(同一事件,见 tooltip)。 */}
             <MetricRow
               icon={() => <IconGauge />}
-              label={t("memReplacement") || "记忆置换率"}
+              label={t("memReplacement")}
               value={() => {
                 const r = statusInfo()?.replacement_rate ?? 0;
                 const pct = r * 100;
@@ -299,14 +299,14 @@ const SystemHealthMonitor: Component = () => {
               }}
               hint={() => {
                 const q = memStats()?.queue;
-                return <span title={t("memReplacementCoupling") || ""}>{t("shmEvictions") || "淘汰"} {q?.evictions ?? 0}</span>;
+                return <span title={t("memReplacementCoupling")}>{t("shmEvictions")} {q?.evictions ?? 0}</span>;
               }}
             />
 
             {/* 劳累度(命中率/淘汰/碎片的合成,反映存放区+索引区健康) */}
             <MetricRow
               icon={() => <IconBrain />}
-              label={t("shmFatigue") || "劳累度"}
+              label={t("shmFatigue")}
               value={() => {
                 const f = memStats()?.fatigue;
                 if (!f) return <span class="shm-mono">—</span>;
@@ -325,20 +325,20 @@ const SystemHealthMonitor: Component = () => {
                 if (!f) return <span>—</span>;
                 return (
                   <span>
-                    {t("shmCacheHitRate") || "命中率"} {(f.cache_hit_rate * 100).toFixed(0)}%
-                    · {t("shmEviction") || "淘汰"} {f.eviction_rate.toFixed(0)}
-                    · {t("shmFragments") || "碎片"} {f.fragment_count}
+                    {t("shmCacheHitRate")} {(f.cache_hit_rate * 100).toFixed(0)}%
+                    · {t("shmEviction")} {f.eviction_rate.toFixed(0)}
+                    · {t("shmFragments")} {f.fragment_count}
                   </span>
                 );
               }}
             />
 
             {/* ── 索引区(找"该调入谁"的指针;RAG/L2 只是索引手段)── */}
-            <div class="shm-section">{t("regionIndex") || "索引区"}</div>
+            <div class="shm-section">{t("regionIndex")}</div>
 
             <MetricRow
               icon={() => <IconBrain />}
-              label={t("indexDensity") || "索引密度"}
+              label={t("indexDensity")}
               value={() => {
                 const d = statusInfo()?.index_density ?? 0;
                 return <span class="shm-mono">{d.toFixed(2)}</span>;
@@ -352,7 +352,7 @@ const SystemHealthMonitor: Component = () => {
 
             <MetricRow
               icon={() => <IconMoon />}
-              label={t("shmFragments") || "碎片数"}
+              label={t("shmFragments")}
               value={() => {
                 const n = statusInfo()?.fragment_count ?? 0;
                 return <span class="shm-mono">{n}</span>;
@@ -365,7 +365,7 @@ const SystemHealthMonitor: Component = () => {
 
             <MetricRow
               icon={() => <IconPlug />}
-              label={t("reverseIndexSize") || "逆向索引"}
+              label={t("reverseIndexSize")}
               value={() => {
                 const n = statusInfo()?.reverse_index_size ?? 0;
                 return <span class="shm-mono">{n}</span>;
@@ -378,7 +378,7 @@ const SystemHealthMonitor: Component = () => {
 
             <MetricRow
               icon={() => <IconGauge />}
-              label={t("coverage") || "覆盖率"}
+              label={t("coverage")}
               value={() => {
                 const dg = statusInfo()?.coverage_deep_green_pct ?? 0;
                 const rd = statusInfo()?.coverage_red_pct ?? 0;
@@ -404,16 +404,16 @@ const SystemHealthMonitor: Component = () => {
             {/* 做梦整理(碎片回收:二次指针升一次、还扫描债)→ 索引区维护 */}
             <MetricRow
               icon={() => <IconMoon />}
-              label={t("shmDreamStatus") || "做梦整理"}
+              label={t("shmDreamStatus")}
               value={() => {
                 const d = dreamSummary();
-                if (!d) return <span class="shm-mono">{t("shmNoDream") || "无记录"}</span>;
+                if (!d) return <span class="shm-mono">{t("shmNoDream")}</span>;
                 return <span class="shm-mono">{d.processed}/{d.total_fragments}</span>;
               }}
               hint={() => {
                 const d = dreamSummary();
                 if (!d) return <span>—</span>;
-                return <span>{t("shmDuration") || "耗时"} {d.duration_ms}ms</span>;
+                return <span>{t("shmDuration")} {d.duration_ms}ms</span>;
               }}
             />
           </div>

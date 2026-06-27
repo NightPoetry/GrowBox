@@ -39,9 +39,9 @@ const ShellTasks: Component = () => {
   });
 
   const stateLabel = (s: string) =>
-    s === "running" ? (t("taskStateRunning") || "运行中")
-    : s === "done" ? (t("taskStateDone") || "已完成")
-    : (t("taskStateFailed") || "失败");
+    s === "running" ? (t("taskStateRunning"))
+    : s === "done" ? (t("taskStateDone"))
+    : (t("taskStateFailed"));
   const stateColor = (s: string) => (s === "running" ? "#0a84ff" : s === "done" ? "#30d158" : "#ff453a");
 
   return (
@@ -49,7 +49,7 @@ const ShellTasks: Component = () => {
       <div ref={wrapperRef} style={{ position: "relative", display: "inline-flex", "align-items": "center" }}>
         <button
           onClick={() => void toggle()}
-          title={t("taskListTitle") || "后台任务"}
+          title={t("taskListTitle")}
           style={{
             display: "inline-flex", "align-items": "center", gap: "4px",
             border: "none", background: "transparent", cursor: "pointer",
@@ -70,11 +70,11 @@ const ShellTasks: Component = () => {
             }}
           >
             <div style={{ "font-size": "12px", "font-weight": 700, "margin-bottom": "6px", color: "#e5e5ea" }}>
-              {t("taskListTitle") || "后台任务"}
+              {t("taskListTitle")}
             </div>
             <Show
               when={tasks().length > 0}
-              fallback={<div style={{ "font-size": "12px", color: "#8e8e93" }}>{t("noRunningTasks") || "暂无后台任务"}</div>}
+              fallback={<div style={{ "font-size": "12px", color: "#8e8e93" }}>{t("noRunningTasks")}</div>}
             >
               <For each={tasks()}>
                 {(tk) => (

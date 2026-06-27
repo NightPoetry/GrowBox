@@ -95,22 +95,22 @@ const DreamPanel: Component = () => {
     <Show when={dreamOpen()}>
       <div class="dream-panel">
         <div class="dream-header">
-          <h3>{t("dreamTitle") || "做梦整理"}</h3>
+          <h3>{t("dreamTitle")}</h3>
           <button class="dream-close" onClick={closeDreamPanel}>&times;</button>
         </div>
         <div class="dream-body">
           <Show when={phase() === "idle"}>
             <p class="dream-info">
-              {t("dreamInfo") || "整理内存碎片，优化记忆网络。"}
+              {t("dreamInfo")}
             </p>
             <button class="dream-start primary" onClick={() => void startDream()}>
-              {t("dreamStartBtn") || "开始整理"}
+              {t("dreamStartBtn")}
             </button>
           </Show>
 
           <Show when={phase() === "running"}>
             <p class="dream-status-text">
-              {t("dreamRunning") || "整理中..."} {sess()?.processed ?? 0}/{sess()?.total_fragments ?? 0}
+              {t("dreamRunning")} {sess()?.processed ?? 0}/{sess()?.total_fragments ?? 0}
             </p>
             <div class="dream-progress-track">
               <div
@@ -122,29 +122,29 @@ const DreamPanel: Component = () => {
 
           <Show when={phase() === "complete"}>
             <div class="dream-complete">
-              <p class="dream-done-label">{t("dreamComplete") || "整理完成"}</p>
+              <p class="dream-done-label">{t("dreamComplete")}</p>
               <Show when={sum()}>
                 <div class="dream-summary">
                   <div class="dream-row">
-                    <span class="dream-label">{t("dreamFragmentsProcessed") || "处理碎片数"}</span>
+                    <span class="dream-label">{t("dreamFragmentsProcessed")}</span>
                     <span class="dream-value">{sum()!.total_fragments}</span>
                   </div>
                   <div class="dream-row">
-                    <span class="dream-label">{t("dreamProcessed") || "已处理"}</span>
+                    <span class="dream-label">{t("dreamProcessed")}</span>
                     <span class="dream-value">{sum()!.processed}</span>
                   </div>
                   <div class="dream-row">
-                    <span class="dream-label">{t("dreamDiscoveries") || "新发现"}</span>
+                    <span class="dream-label">{t("dreamDiscoveries")}</span>
                     <span class="dream-value">{sum()!.total_discoveries}</span>
                   </div>
                   <div class="dream-row">
-                    <span class="dream-label">{t("dreamDuration") || "耗时"}</span>
+                    <span class="dream-label">{t("dreamDuration")}</span>
                     <span class="dream-value">{sum()!.duration_ms}ms</span>
                   </div>
                 </div>
               </Show>
               <button class="dream-start" onClick={() => { setPhase("idle"); setSummary(null); setSession(null); }}>
-                {t("dreamRunAgain") || "再次整理"}
+                {t("dreamRunAgain")}
               </button>
             </div>
           </Show>

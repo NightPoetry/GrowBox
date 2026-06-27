@@ -18,9 +18,9 @@ import {
 const ConnectionTab: Component = () => (
               <div class="settings-tab-pane active">
                 <div class="settings-section">
-                  <h3>{t("llmProvider") || "LLM 提供商"}</h3>
+                  <h3>{t("llmProvider")}</h3>
                   <div class="settings-field">
-                    <label>{t("apiBase") || "API 地址"}</label>
+                    <label>{t("apiBase")}</label>
                     <div style={{ display: "flex", gap: "6px", "flex": 1 }}>
                       <input
                         id="set-api_base"
@@ -34,7 +34,7 @@ const ConnectionTab: Component = () => (
                       />
                       <button
                         type="button"
-                        title={t("scanModelsTip") || "从 API 拉取可用模型列表"}
+                        title={t("scanModelsTip")}
                         disabled={scanning() || !apiBase().trim()}
                         onClick={() => { sfx.tap(); void doScanModels(); }}
                         style={{
@@ -61,7 +61,7 @@ const ConnectionTab: Component = () => (
                     </div>
                   </div>
                   <div class="settings-field">
-                    <label>{t("model") || "模型"}</label>
+                    <label>{t("model")}</label>
                     <Show
                       when={modelOptions().length > 0}
                       fallback={
@@ -93,7 +93,7 @@ const ConnectionTab: Component = () => (
                     </Show>
                   </div>
                   <div class="settings-field">
-                    <label>{t("apiKey") || "API Key"}</label>
+                    <label>{t("apiKey")}</label>
                     <input
                       id="set-api_key"
                       type="password"
@@ -132,37 +132,37 @@ const ConnectionTab: Component = () => (
                       <circle cx="16" cy="16" r="2" />
                       <path d="M11 11l3-2M11 13l3 2" />
                     </svg>
-                    {t("subModelSlot") || "潜意识模型(选填)"}
+                    {t("subModelSlot")}
                   </h3>
                   <p style={{ "font-size": "11px", color: "var(--text-secondary)", margin: "0 0 8px 0", "line-height": "1.5" }}>
-                    {t("subModelHint") || "检索判断 / 联想跳转 / 经验蒸馏 + 提示词自转译的潜意识那份,用这个模型。留空 = 复用主模型(默认)。可填更便宜/本地的小模型分担后台活。改完点下方「重连」生效。"}
+                    {t("subModelHint")}
                   </p>
                   {/* 独立厂商:API 地址 / 模型 / Key 三件一直显示(潜意识可能是别家,需自己的端点和 Key);全留空 = 复用主模型。 */}
                   <div class="settings-field">
-                    <label>{t("apiBase") || "API 地址"}</label>
+                    <label>{t("apiBase")}</label>
                     <input
                       value={subconsciousApiBase()}
                       onInput={(e) => setSubconsciousApiBase(e.currentTarget.value)}
-                      placeholder={t("subModelReuseBase") || "留空 = 用主模型端点"}
+                      placeholder={t("subModelReuseBase")}
                       style={{ flex: 1, "min-width": 0 }}
                     />
                   </div>
                   <div class="settings-field">
-                    <label>{t("model") || "模型"}</label>
+                    <label>{t("model")}</label>
                     <input
                       value={subconsciousModel()}
                       onInput={(e) => setSubconsciousModel(e.currentTarget.value)}
-                      placeholder={t("subModelReuse") || "留空 = 复用主模型"}
+                      placeholder={t("subModelReuse")}
                       style={{ flex: 1, "min-width": 0 }}
                     />
                   </div>
                   <div class="settings-field">
-                    <label>{t("apiKey") || "API Key"}</label>
+                    <label>{t("apiKey")}</label>
                     <input
                       type="password"
                       value={subconsciousApiKey()}
                       onInput={(e) => setSubconsciousApiKey(e.currentTarget.value)}
-                      placeholder={t("subModelReuseKey") || "留空 = 用主模型 Key"}
+                      placeholder={t("subModelReuseKey")}
                     />
                   </div>
                 </div>
@@ -172,16 +172,16 @@ const ConnectionTab: Component = () => (
                       <circle cx="12" cy="12" r="3" />
                       <path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.5 2.5M16.5 16.5L19 19M19 5l-2.5 2.5M7.5 16.5L5 19" />
                     </svg>
-                    {t("embeddingSlot") || "嵌入模型 (Embedding)"}
+                    {t("embeddingSlot")}
                   </h3>
                   <p style={{ "font-size": "11px", color: "var(--text-secondary)", margin: "0 0 8px 0", "line-height": "1.5" }}>
-                    {t("embeddingHint") || "记忆检索的语义向量来源。默认本地 e5(离线、各平台通吃);开远程走 OpenAI 兼容端点。换嵌入器后历史会自动重嵌。改完点下方「重连」生效。"}
+                    {t("embeddingHint")}
                   </p>
                   <div class="tool-toggle">
                     <div class="tool-toggle-info">
-                      <div class="tool-toggle-name">{t("embedUseRemote") || "使用远程嵌入"}</div>
+                      <div class="tool-toggle-name">{t("embedUseRemote")}</div>
                       <div class="tool-toggle-desc">
-                        {embedRemote() ? (t("embedRemoteOn") || "远程 OpenAI 兼容端点") : (t("embedLocalDefault") || "本地 e5(默认)")}
+                        {embedRemote() ? (t("embedRemoteOn")) : (t("embedLocalDefault"))}
                       </div>
                     </div>
                     <label class="toggle-switch">
@@ -195,7 +195,7 @@ const ConnectionTab: Component = () => (
                   </div>
                   <Show when={embedRemote()}>
                     <div class="settings-field">
-                      <label>{t("apiBase") || "API 地址"}</label>
+                      <label>{t("apiBase")}</label>
                       <input
                         value={embedApiBase()}
                         onInput={(e) => setEmbedApiBase(e.currentTarget.value)}
@@ -204,7 +204,7 @@ const ConnectionTab: Component = () => (
                       />
                     </div>
                     <div class="settings-field">
-                      <label>{t("model") || "模型"}</label>
+                      <label>{t("model")}</label>
                       <input
                         value={embedModel()}
                         onInput={(e) => setEmbedModel(e.currentTarget.value)}
@@ -213,7 +213,7 @@ const ConnectionTab: Component = () => (
                       />
                     </div>
                     <div class="settings-field">
-                      <label>{t("apiKey") || "API Key"}</label>
+                      <label>{t("apiKey")}</label>
                       <input
                         type="password"
                         value={embedApiKey()}
@@ -229,13 +229,13 @@ const ConnectionTab: Component = () => (
                       <circle cx="12" cy="12" r="9" />
                       <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
                     </svg>
-                    {t("webSearchTitle") || "Web 搜索"}
+                    {t("webSearchTitle")}
                   </h3>
                   <p style={{ "font-size": "11px", color: "var(--text-secondary)", margin: "0 0 8px 0", "line-height": "1.5" }}>
-                    {t("webSearchHint") || "web_search 的搜索引擎来源:选择提供商并填好 key,AI 才能联网搜资料。web_fetch(抓网页)不依赖此项、开箱即用。改动即时生效。"}
+                    {t("webSearchHint")}
                   </p>
                   <div class="settings-field">
-                    <label>{t("webSearchProviderLabel") || "提供商"}</label>
+                    <label>{t("webSearchProviderLabel")}</label>
                     <select
                       id="set-web_search_provider"
                       value={webProvider()}
@@ -250,7 +250,7 @@ const ConnectionTab: Component = () => (
                         "min-width": 0,
                       }}
                     >
-                      <option value="">{t("webSearchProviderDuckDuckGo") || "DuckDuckGo(免 key · 默认)"}</option>
+                      <option value="">{t("webSearchProviderDuckDuckGo")}</option>
                       <option value="tavily">Tavily</option>
                       <option value="brave">Brave Search</option>
                       <option value="searxng">SearXNG</option>
@@ -258,18 +258,18 @@ const ConnectionTab: Component = () => (
                   </div>
                   <Show when={webProvider()}>
                     <div class="settings-field">
-                      <label>{t("apiBase") || "API 地址"}</label>
+                      <label>{t("apiBase")}</label>
                       <input
                         value={webApiBase()}
                         onInput={(e) => setWebApiBase(e.currentTarget.value)}
                         onChange={saveWebConfig}
-                        placeholder={webProvider() === "searxng" ? (t("webSearchBaseSearxng") || "自建实例地址,如 http://nas.lan:8888(必填)") : (t("webSearchBaseOptional") || "留空 = 官方端点")}
+                        placeholder={webProvider() === "searxng" ? (t("webSearchBaseSearxng")) : (t("webSearchBaseOptional"))}
                         style={{ flex: 1, "min-width": 0 }}
                       />
                     </div>
                     <Show when={webProvider() !== "searxng"}>
                       <div class="settings-field">
-                        <label>{t("apiKey") || "API Key"}</label>
+                        <label>{t("apiKey")}</label>
                         <input
                           type="password"
                           value={webApiKey()}
@@ -279,20 +279,20 @@ const ConnectionTab: Component = () => (
                       </div>
                     </Show>
                     <div class="settings-field">
-                      <label>{t("webSearchMaxResultsLabel") || "返回条数(1~10)"}</label>
+                      <label>{t("webSearchMaxResultsLabel")}</label>
                       <input type="number" min="1" max="10" step="1" placeholder="5" value={webMaxResults()}
                         onInput={(e) => setWebMaxResults(e.currentTarget.value)} onChange={saveWebConfig}
                         style={{ flex: 1, "min-width": 0 }} />
                     </div>
                   </Show>
                   <div class="settings-field">
-                    <label>{t("webTimeoutLabel") || "Web 请求超时(秒,0=不限)"}</label>
+                    <label>{t("webTimeoutLabel")}</label>
                     <input type="number" min="0" step="5" placeholder="30" value={webTimeout()}
                       onInput={(e) => setWebTimeout(e.currentTarget.value)} onChange={saveWebConfig}
                       style={{ flex: 1, "min-width": 0 }} />
                   </div>
                   <p style={{ "font-size": "10px", color: "var(--text-secondary)", margin: "0", "line-height": "1.5" }}>
-                    {t("webToolsFootHint") || "内网/本机地址访问会弹窗请你授权;公网直接抓取。抓回内容按不可信外部输入处理。"}
+                    {t("webToolsFootHint")}
                   </p>
                 </div>
                 <div class="settings-connect-row">
@@ -304,7 +304,7 @@ const ConnectionTab: Component = () => (
                       ? t("cancelConnect")
                       : connected()
                       ? t("reconnect")
-                      : t("connect") || "连接"}
+                      : t("connect")}
                   </button>
                 </div>
               </div>

@@ -128,7 +128,7 @@ const Sidebar: Component = () => {
                   stroke-dasharray={String(GAUGE_TOTAL)} stroke-dashoffset={String(replacementOffset())} stroke={levelColor(replacementRate())} />
               </svg>
               <div class="gauge-val" style={{ color: levelColor(replacementRate()) }}>{(replacementRate() * 100).toFixed(0)}%</div>
-              <div class="gauge-lbl">{t("memReplacement") || "记忆置换率"}</div>
+              <div class="gauge-lbl">{t("memReplacement")}</div>
             </div>
 
             <div class="dash-cell">
@@ -138,7 +138,7 @@ const Sidebar: Component = () => {
                   stroke-dasharray={String(GAUGE_TOTAL)} stroke-dashoffset={String(fatigueOffset())} stroke={levelColor(fatigueVal())} />
               </svg>
               <div class="gauge-val" style={{ color: levelColor(fatigueVal()) }}>{(fatigueVal() * 100).toFixed(0)}%</div>
-              <div class="gauge-lbl">{t("shmFatigue") || "劳累度"}</div>
+              <div class="gauge-lbl">{t("shmFatigue")}</div>
             </div>
 
             <div class="dash-cell">
@@ -148,7 +148,7 @@ const Sidebar: Component = () => {
                   stroke-dasharray={String(GAUGE_TOTAL)} stroke-dashoffset={String(queueOffset())} stroke={levelColor(queueFrac())} />
               </svg>
               <div class="gauge-val" style={{ color: levelColor(queueFrac()) }}>{queueResident()}</div>
-              <div class="gauge-lbl">{t("queueOccupancy") || "缓存队列"}</div>
+              <div class="gauge-lbl">{t("queueOccupancy")}</div>
             </div>
 
             <div class="dash-cell">
@@ -158,7 +158,7 @@ const Sidebar: Component = () => {
                   stroke-dasharray={String(GAUGE_TOTAL)} stroke-dashoffset={String(ctxOffset())} stroke={levelColor(ctxFrac())} />
               </svg>
               <div class="gauge-val" style={{ color: levelColor(ctxFrac()) }}>{fmtTokens(ctxTokens())}/{fmtTokens(ctxWindow())}</div>
-              <div class="gauge-lbl">{t("contextPressure") || "上下文压力"}</div>
+              <div class="gauge-lbl">{t("contextPressure")}</div>
             </div>
 
             <div class="dash-cell">
@@ -168,7 +168,7 @@ const Sidebar: Component = () => {
 
             <div class="dash-cell">
               <div class="num-val">{totalNodes()}</div>
-              <div class="num-lbl">{t("ctrlTotalNodes") || "节点数"}</div>
+              <div class="num-lbl">{t("ctrlTotalNodes")}</div>
             </div>
 
           </div>

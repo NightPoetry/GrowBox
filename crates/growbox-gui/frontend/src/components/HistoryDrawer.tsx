@@ -194,7 +194,7 @@ const HistoryDrawer: Component = () => {
           sfx.tap();
           setHistoryDrawerOpen((p) => !p);
         }}
-        title={historyDrawerOpen() ? (t("removeCitation") || "关闭") : (t("historyPanel") || "对话历史")}
+        title={historyDrawerOpen() ? (t("removeCitation")) : (t("historyPanel"))}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           {historyDrawerOpen() ? (
@@ -221,7 +221,7 @@ const HistoryDrawer: Component = () => {
         {/* Header */}
         <div class="history-drawer-header">
           <h3 class="history-drawer-title">
-            {t("historyPanel") || "对话历史"}
+            {t("historyPanel")}
             <Show when={projectName()}>
               <span class="history-drawer-project-name">
                 {projectName()}
@@ -234,7 +234,7 @@ const HistoryDrawer: Component = () => {
           <button
             class="history-drawer-close"
             onClick={() => setHistoryDrawerOpen(false)}
-            title={t("removeCitation") || "关闭"}
+            title={t("removeCitation")}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <path d="M18 6L6 18" />
@@ -247,7 +247,7 @@ const HistoryDrawer: Component = () => {
         <div class="history-drawer-body" ref={scrollRef} onScroll={handleScroll}>
           <Show when={hasMore()}>
             <div class="history-drawer-loading-indicator">
-              {loading() ? (t("loading") || "加载中…") : ""}
+              {loading() ? (t("loading")) : ""}
             </div>
           </Show>
 
@@ -255,7 +255,7 @@ const HistoryDrawer: Component = () => {
             when={messages().length > 0}
             fallback={
               <div class="history-drawer-empty">
-                {loading() ? (t("loading") || "加载中…") : (t("noSessions") || "暂无历史消息")}
+                {loading() ? (t("loading")) : (t("noSessions"))}
               </div>
             }
           >
@@ -264,7 +264,7 @@ const HistoryDrawer: Component = () => {
                 <div
                   class={`history-drawer-item history-item-${item.role}`}
                   onPointerDown={(e) => onItemPointerDown(e, item)}
-                  title={t("dragToChat") || "点击引用 · 按住向左拖到对话区"}
+                  title={t("dragToChat")}
                 >
                   <div class="history-drawer-item-meta">
                     <span class={`history-drawer-item-role role-${item.role}`}>

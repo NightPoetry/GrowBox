@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "build:debug": "tsc -b && VITE_GROWBOX_DEBUG=1 vite build",
+    "check-i18n": "node ../../../scripts/check-i18n.mjs",
+    "build": "node ../../../scripts/check-i18n.mjs && tsc -b && vite build",
+    "build:debug": "node ../../../scripts/check-i18n.mjs && tsc -b && VITE_GROWBOX_DEBUG=1 vite build",
     "preview": "vite preview"
   },
   "dependencies": {

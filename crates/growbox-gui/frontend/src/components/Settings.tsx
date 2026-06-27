@@ -163,7 +163,7 @@ const Settings: Component = () => {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M5 12h14M12 5l7 7-7 7" />
               </svg>
-              <span>{t("connection") || "连接"}</span>
+              <span>{t("connection")}</span>
             </button>
             <button
               class={`settings-tab-btn ${settingsTab() === "agent" ? "active" : ""}`}
@@ -211,7 +211,7 @@ const Settings: Component = () => {
                 <rect x="3" y="14" width="7" height="7" rx="1" />
                 <rect x="14" y="14" width="7" height="7" rx="1" />
               </svg>
-              <span>{t("settingsControlTab") || "控制面板"}</span>
+              <span>{t("settingsControlTab")}</span>
             </button>
             <button
               class={`settings-tab-btn ${settingsTab() === "about" ? "active" : ""}`}
@@ -233,7 +233,7 @@ const Settings: Component = () => {
                 <polyline points="17 8 12 3 7 8" />
                 <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
-              <span>{t("dlcTab") || "DLC"}</span>
+              <span>{t("dlcTab")}</span>
             </button>
           </div>
 
@@ -373,9 +373,9 @@ const Settings: Component = () => {
             <Show when={settingsTab() === "control"}>
               <div class="settings-tab-pane active">
                 <div class="settings-section settings-control-pane">
-                  <h3>{t("settingsControlTab") || "控制面板"}</h3>
+                  <h3>{t("settingsControlTab")}</h3>
                   <p class="settings-section-hint">
-                    {t("settingsControlHint") || "事件历史与底层状态检视。需持续监控的实时信号请用顶栏「系统健康监控」。"}
+                    {t("settingsControlHint")}
                   </p>
                   <Show when={settingsOpen()}>
                     <ControlPanel />
