@@ -247,7 +247,7 @@ fn scan_artifact_workflows(work_dir: &std::path::Path) -> Vec<Workflow> {
 /// ① **造物创建工作流**——强制顺序的典范(先想清结构再创建,再核对收尾)。
 /// ② **命令安全审查工作流**(栈函数 v2 旗舰示范,用户原例)——执行命令前的可复用"子函数"。
 fn builtin_global_workflows() -> Vec<Workflow> {
-    vec![command_safety_workflow(), financial_action_gate_workflow(), investigate_workflow(), Workflow {
+    vec![command_safety_workflow(), financial_action_gate_workflow(), investigate_workflow(), package_app_workflow(), Workflow {
         name: "create_artifact_workflow".into(),
         description: "造物创建工作流:需要新建一个可交互的造物(UI/小工具/小游戏)时调用,\
                       按既定步骤(先想清结构与交互、再一次性创建、最后核对收尾)完成,避免边想边反复重画。"
@@ -406,6 +406,61 @@ fn investigate_workflow() -> Workflow {
     }
 }
 
+/// ★打包工作流(通用 Tauri 出包纪律)★。用户 2026-06-27 决策:把打包步骤固化进工作流,防"偶尔出现的打包错误"。
+/// 是**通用最佳实践**而非项目专属(故内置;本仓库专属脚本名由 prompt 引导 AI 自己找,不硬编码 —— 见
+/// `builtin_global_workflows` 文档"项目专属不硬编码"原则)。它锁死的三件事都是 Tauri 通用坑:
+/// ① 绝不在前端子目录跑 `cargo tauri build`(会报 "Couldn't recognize ... Tauri project" 且 .app 不更新);
+/// ② 先重建前端 dist(`beforeBuildCommand` 常为空,cargo 不替你重建,否则旧 dist 被嵌进包);
+/// ③ 出包后验证产物**真新 + 已签名**(防"以为更新了、其实跑的是旧二进制"老坑)。
+/// 结构上:run 节点用 shell 触发流转到 verify;verify 为终态(自带 shell,可在产物没成时就地重跑)。
+/// 长构建/超时:prompt 引导前台跑到结束,shell 超时不够时用恒可用的 ask_user 请用户把超时设为 0 再开始。
+fn package_app_workflow() -> Workflow {
+    Workflow {
+        name: "package_app".into(),
+        description: "打包 / 出安装包(Tauri 桌面应用):需要给应用出包(.app / .dmg / .exe)时调用。\
+                      它强制走防坑黄金路径——优先用项目自带打包脚本(如 scripts/build-*.sh),从含 tauri.conf.json 的\
+                      项目根构建(绝不在前端子目录跑 cargo tauri build),先重建前端 dist,最后验证产物真新且已签名。"
+            .into(),
+        scope: WorkflowScope::Global,
+        entry: "run".into(),
+        canvas: None,
+        triggers: vec![],
+        nodes: vec![
+            Node {
+                id: "run".into(),
+                prompt: "打包·第 1 步(构建出包)。优先用**项目自带打包脚本**:先用 file_list 看 scripts/ 下有没有 \
+                         build-test.sh / build-official.sh 之类——有就用它(脚本通常已一条龙做完[前端 dist 重建 → 项目根 \
+                         cargo tauri build → 签名],是绕开所有坑的黄金路径)。没有脚本才手动:先在前端目录重建 dist\
+                         (beforeBuildCommand 常为空,cargo 不会替你重建 dist,否则旧 dist 被嵌进包),再回到**含 \
+                         tauri.conf.json 的项目根**跑 cargo tauri build。\n\
+                         ★铁律:绝不 cd 进前端子目录跑 cargo tauri build★——会报 'Couldn't recognize the current folder as \
+                         a Tauri project',而且 .app 不会更新、你却以为更新了。\n\
+                         构建耗时数分钟:用 shell **前台一条命令跑到结束**(别后台甩开,否则本步会提前判完成);若你的 \
+                         shell 超时(设置)短于构建时长,先用 ask_user 请用户把 设置→shell 超时设为 0(不限)再开始,\
+                         否则会被中途杀掉。用 file_list 探查只是找脚本/确认目录,真正开跑用 shell —— 跑完即进入验证。"
+                    .into(),
+                tools: vec!["shell".into(), "file_list".into()],
+                next: vec![Transition { on: TransitionOn::ToolCalled("shell".into()), to: "verify".into() }],
+            },
+            Node {
+                id: "verify".into(),
+                prompt: "打包·第 2 步(验证产物,别只凭脚本说成功)。逐条核对、再 finish:\n\
+                         ① 列出产物(Tauri 默认 target/release/bundle/ 下的 .app / .dmg / .exe;加了 --debug 则在 \
+                         target/debug/bundle/),确认存在且**修改时间是刚刚**(防'以为更新了、其实是旧二进制'老坑);\n\
+                         ② 验签(macOS):`codesign --verify --verbose=2 <上面的 .app>` 应见 'valid on disk' + \
+                         'satisfies its Designated Requirement';若是 ad-hoc 签名(没固定证书),可用但每次重建会重弹 \
+                         TCC 授权,提醒用户跑一次 scripts/setup-dev-cert.sh 固定签名;\n\
+                         ③ 把产物路径报给用户(测试包再附自检:curl http://127.0.0.1:19999/health)。\n\
+                         若产物缺失 / 时间戳不新 / 验签异常 = 构建其实没成:用 shell 就地重跑对应脚本(或读构建输出诊断),\
+                         别谎报成功。"
+                    .into(),
+                tools: vec!["shell".into(), "file_list".into()],
+                next: vec![], // 终态:核对满意 → finish;没成 → 就地 shell 重跑(留在本节点)。
+            },
+        ],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +516,28 @@ mod tests {
                 assert!(!node.tools.iter().any(|t| t == forbidden), "授权节点不应有提交类工具 {forbidden}");
             }
         }
+    }
+
+    /// ★打包工作流(通用 Tauri 出包纪律)★:内置注册 + 暴露成 Global 入口工具;
+    /// run 节点用 shell 触发流转到 verify(file_list 探查不流转);verify 为终态、自带 shell 可就地重跑。
+    #[test]
+    fn package_app_workflow_is_builtin_and_flows_run_to_verify() {
+        let store = WorkflowStore::with_builtins();
+        assert!(store.names().contains(&"package_app".to_string()));
+        let wf = store.get("package_app").unwrap();
+        assert!(wf.entry_exists());
+        assert_eq!(wf.entry, "run");
+        // 暴露成 Global 入口工具,描述非空。
+        let defs = store.tool_defs();
+        assert!(defs.iter().any(|d| d.name == "package_app" && !d.description.is_empty()));
+        // run:真正开跑(shell)→ 流转 verify;只用 file_list 探查(找脚本/确认目录)→ 留在原节点不提前判完成。
+        let run = wf.node("run").unwrap();
+        assert_eq!(run.transition_for(&["shell".into()]), Some("verify"));
+        assert_eq!(run.transition_for(&["file_list".into()]), None, "探查不该提前流转,只有真正构建(shell)才进验证");
+        // verify 为终态(无流转;finish 恒可用),且自带 shell 以便产物没成时就地重跑。
+        let verify = wf.node("verify").unwrap();
+        assert!(verify.next.is_empty());
+        assert!(verify.tools.iter().any(|t| t == "shell"), "verify 需保留 shell 以便产物没成时就地重跑");
     }
 
     #[test]
