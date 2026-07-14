@@ -2,7 +2,7 @@
 name = "growbox-gui"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 rust-version.workspace = true
 
 # 库(脊柱:state/registry/executors/bridge/agent,无 Tauri 依赖,可独立单测)
